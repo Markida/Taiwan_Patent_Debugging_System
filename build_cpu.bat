@@ -1,0 +1,27 @@
+@echo off
+chcp 65001
+
+cd /d "%~dp0"
+
+call conda activate patent_pack_cpu
+
+python -m nuitka ^
+  --standalone ^
+  --windows-console-mode=disable ^
+  --enable-plugin=pyside6 ^
+  --module-parameter=torch-disable-jit=yes ^
+  --include-package=ultralytics ^
+  --include-package=easyocr ^
+  --include-package=torch ^
+  --include-package=torchvision ^
+  --include-package=cv2 ^
+  --include-package=pymupdf ^
+  --include-package-data=easyocr ^
+  --include-package-data=pymupdf ^
+  --include-data-dir=models=models ^
+  --include-data-dir=easyocr_models=easyocr_models ^
+  --output-dir=build_release_cpu ^
+  --output-filename=SantoPatentOCR.exe ^
+  main.py
+
+pause
