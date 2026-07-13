@@ -1,234 +1,86 @@
-\# Patent Number OCR
+# Patent Number OCR
 
+Patent drawing reference-label recognition and checklist comparison tool. The desktop application combines a YOLO label locator with offline EasyOCR recognition and supports images, multi-page PDFs, manual page rotation, batch comparison, and TXT export.
 
+## Current capabilities
 
-A desktop OCR tool for detecting and comparing patent drawing reference labels using YOLO, EasyOCR, PySide6, PDF-to-image conversion, image rotation, and automated label checklist verification.
+- Detect complete patent labels and recognize `0-9`, `A-Z`, and the prime mark `'`
+- Support labels such as `A`, `B`, `10A`, `IV`, `VIII`, and `7'`
+- Import multiple images or convert a PDF into page images
+- Rotate individual pages by 90 degrees before recognition
+- Compare recognized labels with a manually entered checklist
+- Report labels missing from the image and labels found only in the image
+- Separate results by image and provide a persistent result scrollbar
+- Export complete batch results to UTF-8 TXT
+- Provide a reusable `features/demo_tool/` feature-page template
 
+## Recognition architecture
 
+The recommended production model is `models/patent_label_group_v1.pt`. It detects an entire reference-label group as one `patent_label` box. EasyOCR then reads the contents of that box using only the bundled English detector and recognizer weights. This approach is more reliable for narrow Roman numerals and prime marks than detecting every character as a separate YOLO object.
 
-\## Overview
+The application never downloads OCR weights at runtime. `download_enabled=False` is enforced so an offline company computer fails with a clear missing-file message instead of attempting network access.
 
+## Source setup
 
+Python 3.10 or 3.11 on Windows is recommended. Install the dependencies, place the external model files described below, and run:
 
-Patent Number OCR is a desktop application designed to assist with patent figure review. It can detect reference labels in patent drawings, process PDF files into images, rotate incorrect image orientations, and compare detected labels against a user-provided reference checklist.
-
-
-
-The project is currently built around a modular Python architecture, making it easier to extend with additional patent-related tools in the future.
-
-
-
-\## Features
-
-
-
-\* Patent drawing reference-label detection
-
-\* Batch image recognition
-
-\* PDF import and page-to-image conversion
-
-\* Image rotation by 90 degrees
-
-\* Reference label checklist comparison
-
-\* TXT result export
-
-\* CPU/GPU auto-detection
-
-\* Legacy YOLO + EasyOCR recognition mode
-
-\* Future YOLO character-class model support through `class\_map.json`
-
-\* Modular project structure for future feature expansion
-
-
-
-\## Current Recognition Modes
-
-
-
-\### Legacy Mode
-
-
-
-Uses YOLO to detect label regions and EasyOCR to recognize numeric characters.
-
-
-
-\### YOLO Character Model Mode
-
-
-
-Designed for future models that directly classify characters such as:
-
-
-
-\* Numbers: `0-9`
-
-\* Letters: `A-Z`
-
-\* Prime mark: `'`
-
-
-
-This allows labels such as `7'`, `8'`, `A`, and `10A` to be supported with newer models.
-
-
-
-\## Project Structure
-
-
-
-```text
-
-PatentNumberOCR/
-
-├── main.py
-
-├── app/
-
-│   ├── config.py
-
-│   ├── paths.py
-
-│   ├── styles.py
-
-│   └── main\_window.py
-
-├── ui/
-
-│   ├── home\_page.py
-
-│   └── recognition\_page.py
-
-├── features/
-
-│   ├── registry.py
-
-│   └── patent\_ocr/
-
-│       ├── class\_map.py
-
-│       ├── easyocr\_loader.py
-
-│       ├── image\_tools.py
-
-│       ├── label\_parser.py
-
-│       ├── label\_matcher.py
-
-│       ├── pdf\_tools.py
-
-│       ├── ocr\_engine.py
-
-│       └── ocr\_worker.py
-
-├── models/
-
-├── easyocr\_models/
-
-├── sample/
-
-├── README.md
-
-├── requirements.txt
-
-└── .gitignore
-
-```
-
-
-
-\## How to Run
-
-
-
-```bash
-
+```powershell
+python -m pip install -r requirements.txt
 python main.py
-
 ```
 
+The existing Conda helper can also be used:
 
-
-\## Required External Files
-
-
-
-The following files are not included in the repository because they may be large:
-
-
-
-```text
-
-models/\*.pt
-
-easyocr\_models/\*.pth
-
+```powershell
+.\run_app.bat --check
+.\run_app.bat
 ```
 
+## Required external model files
 
-
-Please place the YOLO model file inside:
-
-
+Model weights are intentionally excluded from Git because they are large binary artifacts.
 
 ```text
-
 models/
-
+  patent_label_group_v1.pt
+easyocr_models/
+  craft_mlt_25k.pth
+  english_g2.pth
 ```
 
+When the recommended YOLO model is present, the recognition page selects it automatically. A different compatible `.pt` model can still be selected manually.
 
-
-Please place EasyOCR model files inside:
-
-
+## Project structure
 
 ```text
-
-easyocr\_models/
-
+app/                         configuration, paths, styles, main window
+features/patent_ocr/         OCR, PDF, image, parsing, and comparison logic
+features/demo_tool/          reusable feature-module template
+ui/                          application pages
+models/                      class map, metrics, external YOLO weights
+easyocr_models/              external offline EasyOCR weights
+training/                    annotation, dataset, training, and evaluation tools
+tests/                       automated regression tests
+main.py                      application entry point
 ```
 
+## Verification
 
-
-Expected EasyOCR files include:
-
-
-
-```text
-
-craft\_mlt\_25k.pth
-
-english\_g2.pth
-
+```powershell
+python -m unittest discover -s tests
+.\run_app.bat --check
 ```
 
+The checked-in evaluation summaries for the recommended model are in `models/`. They record fixed-threshold locator metrics and end-to-end OCR results without including private source documents or model weights.
 
+## Offline Windows release
 
-\## Roadmap
+The release workflow builds a standalone CPU package containing the executable, Python runtime components, required native libraries, the production YOLO model, and both EasyOCR weights. The resulting folder can run without Python, Conda, administrator installation, or internet access. See `OFFLINE_RELEASE.md` after the packaging workflow is added.
 
+## Privacy and repository policy
 
+Training documents, generated datasets, model weights, OCR weights, output files, build folders, and local machine paths are excluded from version control. Only source code, tests, generic training utilities, class mappings, and sanitized metric summaries are published.
 
-\* Add support for alphabetic reference labels
+## Disclaimer
 
-\* Add support for prime labels such as `7'`, `8'`, and `9'`
-
-\* Improve recognition accuracy toward 97%
-
-\* Reduce dependency on EasyOCR by using YOLO character-class recognition
-
-\* Add more patent-related utility tools under the same desktop UI framework
-
-
-
-\## Disclaimer
-
-
-
-This tool is designed to assist patent figure review and reference-label checking. It should be used as a supporting tool, not as a replacement for professional review.
-
-
-
+This tool assists patent figure review and reference-label checking. Recognition output should still be reviewed by a person before it is used for formal work.

@@ -4,6 +4,9 @@ from features.patent_ocr.label_parser import (
 )
 
 
+IMAGE_RESULT_SEPARATOR = "----------------------------------------"
+
+
 def build_reference_comparison_text(all_results, reference_items):
     """
     將辨識結果與使用者輸入的標號清單進行比對。
@@ -37,15 +40,23 @@ def build_reference_comparison_text(all_results, reference_items):
     lines.append("")
     lines.append("【依圖片比對】")
 
-    for result in all_results:
+    for result_index, result in enumerate(all_results):
+        if result_index > 0:
+            lines.append("")
+            lines.append(IMAGE_RESULT_SEPARATOR)
+
         image_name = result.get("image_name", "未知圖片")
         recognized_numbers = result.get("numbers", [])
 
-        recognized_set = set(
-            normalize_label_text(number)
-            for number in recognized_numbers
-            if normalize_label_text(number)
-        )
+        normalized_recognized_numbers = []
+        recognized_set = set()
+
+        for number in recognized_numbers:
+            normalized = normalize_label_text(number)
+            if not normalized or normalized in recognized_set:
+                continue
+            normalized_recognized_numbers.append(normalized)
+            recognized_set.add(normalized)
 
         present_numbers = [
             number for number in expected_numbers
@@ -55,6 +66,11 @@ def build_reference_comparison_text(all_results, reference_items):
         missing_numbers = [
             number for number in expected_numbers
             if number not in recognized_set
+        ]
+
+        unexpected_numbers = [
+            number for number in normalized_recognized_numbers
+            if number not in reference_map
         ]
 
         for number in present_numbers:
@@ -78,6 +94,14 @@ def build_reference_comparison_text(all_results, reference_items):
             )
         else:
             lines.append("未出現的標號：無")
+
+        if unexpected_numbers:
+            lines.append(
+                "圖片中有出現，但是清單裡沒有出現的標號：" +
+                ", ".join(unexpected_numbers)
+            )
+        else:
+            lines.append("圖片中有出現，但是清單裡沒有出現的標號：無")
 
     lines.append("")
     lines.append("【依標號彙整】")

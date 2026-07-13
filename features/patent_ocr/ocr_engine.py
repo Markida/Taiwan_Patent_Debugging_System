@@ -5,9 +5,12 @@ import torch
 
 from app.config import (
     YOLO_CONF,
+    YOLO_IOU,
     OCR_CONF,
     IMG_SIZE,
     PAD,
+    OCR_ALLOWLIST,
+    OCR_CHARACTER_MIN_CONFIDENCE,
     Y_TOLERANCE,
     MAX_X_GAP,
     MAX_LABEL_LENGTH,
@@ -17,7 +20,8 @@ from app.config import (
 from features.patent_ocr.class_map import (
     get_default_class_map,
     map_yolo_class_to_char,
-    is_yolo_char_model
+    is_yolo_char_model,
+    is_yolo_label_model,
 )
 
 from features.patent_ocr.label_parser import normalize_label_text
@@ -96,6 +100,19 @@ def clean_ocr_text(text):
     return "".join(c for c in text if c.isdigit())
 
 
+def clean_ocr_character(text, allowlist=OCR_ALLOWLIST):
+    """Normalize one OCR character while preserving enabled letters/prime."""
+
+    allowlist = str(allowlist)
+
+    if allowlist and all(character.isdigit() for character in allowlist):
+        return clean_ocr_text(text)
+
+    normalized = str(text).strip().upper()
+    normalized = normalized.replace("’", "'").replace("′", "'").replace("`", "'")
+    return "".join(character for character in normalized if character in allowlist)
+
+
 def preprocess_roi(roi):
     """
     將單一 ROI 做灰階、二值化、放大。
@@ -122,6 +139,272 @@ def preprocess_roi(roi):
     )
 
     return resized
+
+
+def preprocess_roi_variants(roi):
+    """Build complementary single-angle OCR inputs for a YOLO character crop.
+
+    Raw grayscale with a white border preserves thin strokes.  Adaptive
+    thresholding remains the fallback for crops affected by drawing lines.
+    """
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    raw_resized = cv2.resize(
+        gray,
+        None,
+        fx=4,
+        fy=4,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    raw_with_border = cv2.copyMakeBorder(
+        raw_resized,
+        30,
+        30,
+        30,
+        30,
+        cv2.BORDER_CONSTANT,
+        value=255,
+    )
+    return (raw_with_border, preprocess_roi(roi))
+
+
+def _best_easyocr_character(results, allowlist="0123456789"):
+    """Return the best single digit from EasyOCR's standard result tuples."""
+
+    best_text = ""
+    best_conf = 0.0
+
+    for detection in results or []:
+        if len(detection) < 3:
+            continue
+
+        text = clean_ocr_character(detection[1], allowlist=allowlist)
+        confidence = float(detection[2])
+
+        if len(text) == 1 and confidence > best_conf:
+            best_text = text
+            best_conf = confidence
+
+    return best_text, best_conf
+
+
+def _best_easyocr_label(
+    results,
+    allowlist=OCR_ALLOWLIST,
+    max_label_length=MAX_LABEL_LENGTH,
+):
+    """Return the best complete patent label from EasyOCR result tuples."""
+
+    best_text = ""
+    best_conf = 0.0
+    for detection in results or []:
+        if len(detection) < 3:
+            continue
+        text = normalize_label_text(
+            clean_ocr_character(detection[1], allowlist=allowlist)
+        )
+        confidence = float(detection[2])
+        if 1 <= len(text) <= int(max_label_length) and confidence > best_conf:
+            best_text = text
+            best_conf = confidence
+    return best_text, best_conf
+
+
+def select_easyocr_label_candidate(candidates):
+    """Choose between raw and thresholded group OCR candidates.
+
+    Roman numerals benefit from preserving every thin ``I`` stroke, so a
+    slightly longer pure Roman candidate receives a small score bonus.
+    Other label types continue to use OCR confidence directly.
+    """
+
+    candidates = [
+        (text, float(confidence))
+        for text, confidence in candidates
+        if text
+    ]
+    if not candidates:
+        return "", 0.0
+
+    roman_like = all(
+        len(text) >= 2 and set(text) <= set("IVXTL")
+        for text, _confidence in candidates
+    )
+
+    def score(candidate):
+        text, confidence = candidate
+        if roman_like:
+            return confidence + 0.10 * len(text) + (
+                0.05 if set(text) <= set("IVX") else 0.0
+            )
+        return confidence
+
+    return max(candidates, key=score)
+
+
+def count_roman_i_strokes(roi, minimum_height_ratio=0.65):
+    """Count full-height vertical ``I`` strokes in a tightly detected group.
+
+    The diagonal sides of ``V`` do not span most rows in any single column,
+    while each adjacent ``I`` does. This makes the projection conservative and
+    independent of the absolute character size.
+    """
+
+    if roi is None or roi.size == 0:
+        return 0
+    if len(roi.shape) == 3:
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = roi
+    _threshold, ink = cv2.threshold(
+        gray,
+        0,
+        255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+    )
+    height, _width = ink.shape[:2]
+    minimum_ink = max(3, int(round(height * float(minimum_height_ratio))))
+    tall_columns = (ink > 0).sum(axis=0) >= minimum_ink
+
+    runs = []
+    start = None
+    for index, is_tall in enumerate(list(tall_columns) + [False]):
+        if is_tall and start is None:
+            start = index
+        elif not is_tall and start is not None:
+            runs.append((start, index - 1))
+            start = None
+
+    maximum_stroke_width = max(2, int(round(height * 0.25)))
+    return sum(
+        1
+        for start, end in runs
+        if 1 <= end - start + 1 <= maximum_stroke_width
+    )
+
+
+def recognize_easyocr_character(
+    reader,
+    processed_roi,
+    min_confidence=OCR_CONF,
+    allowlist=OCR_ALLOWLIST,
+):
+    """Recognize a YOLO-cropped character without detecting text a second time.
+
+    The YOLO box already describes the text region.  EasyOCR ``recognize`` can
+    therefore consume the full ROI directly.  The older ``readtext`` path is
+    retained as a fallback for difficult crops and older EasyOCR versions.
+    No rotation candidates are used here because page orientation is controlled
+    by the UI before recognition.
+    """
+
+    best_text = ""
+    best_conf = 0.0
+
+    if hasattr(reader, "recognize"):
+        height, width = processed_roi.shape[:2]
+
+        try:
+            results = reader.recognize(
+                processed_roi,
+                horizontal_list=[[0, width, 0, height]],
+                free_list=[],
+                allowlist=allowlist,
+                detail=1,
+                rotation_info=None,
+                paragraph=False,
+            )
+            best_text, best_conf = _best_easyocr_character(
+                results,
+                allowlist=allowlist,
+            )
+        except (AttributeError, TypeError, ValueError):
+            # Keep compatibility with older EasyOCR releases/readers.
+            best_text = ""
+            best_conf = 0.0
+
+    if best_text and best_conf >= min_confidence:
+        return best_text, best_conf
+
+    fallback_results = reader.readtext(
+        processed_roi,
+        allowlist=allowlist,
+        paragraph=False,
+    )
+    fallback_text, fallback_conf = _best_easyocr_character(
+        fallback_results,
+        allowlist=allowlist,
+    )
+
+    if fallback_conf > best_conf:
+        return fallback_text, fallback_conf
+
+    return best_text, best_conf
+
+
+def recognize_easyocr_label(
+    reader,
+    processed_roi,
+    min_confidence=OCR_CONF,
+    allowlist=OCR_ALLOWLIST,
+    max_label_length=MAX_LABEL_LENGTH,
+):
+    """Recognize a complete label inside a group-level YOLO crop."""
+
+    best_text = ""
+    best_conf = 0.0
+    if hasattr(reader, "recognize"):
+        height, width = processed_roi.shape[:2]
+        try:
+            results = reader.recognize(
+                processed_roi,
+                horizontal_list=[[0, width, 0, height]],
+                free_list=[],
+                allowlist=allowlist,
+                detail=1,
+                rotation_info=None,
+                paragraph=False,
+            )
+            best_text, best_conf = _best_easyocr_label(
+                results,
+                allowlist=allowlist,
+                max_label_length=max_label_length,
+            )
+        except (AttributeError, TypeError, ValueError):
+            best_text = ""
+            best_conf = 0.0
+
+    if best_text and best_conf >= min_confidence:
+        return best_text, best_conf
+
+    fallback_results = reader.readtext(
+        processed_roi,
+        allowlist=allowlist,
+        paragraph=False,
+    )
+    fallback_text, fallback_conf = _best_easyocr_label(
+        fallback_results,
+        allowlist=allowlist,
+        max_label_length=max_label_length,
+    )
+    if fallback_conf > best_conf:
+        return fallback_text, fallback_conf
+    return best_text, best_conf
+
+
+def meets_character_confidence(
+    text,
+    confidence,
+    min_confidence=OCR_CONF,
+    character_minimums=OCR_CHARACTER_MIN_CONFIDENCE,
+):
+    """Apply a stricter threshold to known high-risk character confusions."""
+
+    required_confidence = max(
+        float(min_confidence),
+        float(character_minimums.get(text, min_confidence)),
+    )
+    return bool(text) and float(confidence) >= required_confidence
 
 
 def group_chars_to_labels(
@@ -205,13 +488,7 @@ def group_chars_to_labels(
 
             gap = item["x1"] - prev["x2"]
 
-            prev_width = prev["x2"] - prev["x1"]
-            item_width = item["x2"] - item["x1"]
-            avg_width = (prev_width + item_width) / 2
-
-            dynamic_gap = max(max_x_gap, avg_width * 1.2)
-
-            if gap <= dynamic_gap:
+            if gap <= max_x_gap:
                 current_group.append(item)
             else:
                 grouped_char_lists.append(current_group)
@@ -252,8 +529,9 @@ def group_chars_to_labels(
             "chars": group
         })
 
-    results = sorted(results, key=lambda r: (r["y1"], r["x1"]))
-
+    # Rows and their groups are already built top-to-bottom and left-to-right.
+    # Re-sorting by the exact y1 coordinate can reverse items on the same row
+    # when their boxes differ vertically by only one or two pixels.
     return results
 
 
@@ -296,6 +574,7 @@ def recognize_one_image(
         source=str(image_path),
         imgsz=imgsz,
         conf=yolo_conf,
+        iou=YOLO_IOU,
         device=compute_device,
         verbose=False
     )
@@ -303,6 +582,8 @@ def recognize_one_image(
     boxes = results[0].boxes
 
     char_items = []
+    label_items = []
+    use_yolo_label_groups = is_yolo_label_model(model)
 
     if boxes is not None and len(boxes) > 0:
 
@@ -343,28 +624,101 @@ def recognize_one_image(
                     best_text = mapped_char
                     best_conf = box_conf
 
+            elif use_yolo_label_groups:
+                if reader is None:
+                    raise RuntimeError(
+                        "EasyOCR reader is required for label-group models."
+                    )
+
+                processed_rois = preprocess_roi_variants(roi)
+                label_candidates = []
+                for processed_roi in processed_rois:
+                    candidate_text, candidate_conf = recognize_easyocr_label(
+                        reader,
+                        processed_roi,
+                        min_confidence=ocr_conf,
+                        allowlist=OCR_ALLOWLIST,
+                    )
+                    label_candidates.append((candidate_text, candidate_conf))
+
+                best_text, best_conf = select_easyocr_label_candidate(
+                    label_candidates
+                )
+
+                # EasyOCR occasionally reads the first stroke of III as T or
+                # L. Only for this narrow ambiguous pattern, retry with the
+                # Roman alphabet so normal letter labels remain untouched.
+                roman_strokes = sum(character in "IVX" for character in best_text)
+                if (
+                    roman_strokes >= 2
+                    and any(character in "TL" for character in best_text)
+                ):
+                    roman_candidates = []
+                    for processed_roi in processed_rois:
+                        roman_candidates.append(
+                            recognize_easyocr_label(
+                                reader,
+                                processed_roi,
+                                min_confidence=0.0,
+                                allowlist="IVX",
+                            )
+                        )
+                    roman_text, roman_conf = select_easyocr_label_candidate(
+                        roman_candidates
+                    )
+                    if (
+                        len(roman_text) >= 2
+                        and set(roman_text) <= set("IVX")
+                        and roman_conf >= max(0.70, best_conf)
+                    ):
+                        best_text = roman_text
+                        best_conf = roman_conf
+
+                if best_text in {"V", "VI", "VII", "VIII"}:
+                    i_strokes = count_roman_i_strokes(roi)
+                    if 1 <= i_strokes <= 3 and i_strokes > best_text.count("I"):
+                        best_text = "V" + "I" * i_strokes
+
             else:
                 if reader is None:
                     raise RuntimeError("EasyOCR reader 尚未載入，無法辨識 digit。")
 
-                processed_roi = preprocess_roi(roi)
+                for processed_roi in preprocess_roi_variants(roi):
+                    candidate_text, candidate_conf = recognize_easyocr_character(
+                        reader,
+                        processed_roi,
+                        min_confidence=ocr_conf,
+                        allowlist=OCR_ALLOWLIST,
+                    )
 
-                ocr_result = reader.readtext(
-                    processed_roi,
-                    allowlist="0123456789",
-                    paragraph=False
-                )
+                    if (
+                        meets_character_confidence(
+                            candidate_text,
+                            candidate_conf,
+                            min_confidence=ocr_conf,
+                        )
+                        and candidate_conf > best_conf
+                    ):
+                        best_text = candidate_text
+                        best_conf = candidate_conf
 
-                for det in ocr_result:
-                    text = det[1]
-                    confidence = float(det[2])
-                    clean_num = clean_ocr_text(text)
+                    if best_text and best_conf >= ocr_conf:
+                        break
 
-                    if len(clean_num) == 1 and confidence > best_conf:
-                        best_text = clean_num
-                        best_conf = confidence
-
-            if best_text and best_conf >= ocr_conf:
+            if use_yolo_label_groups and best_text and best_conf >= ocr_conf:
+                normalized_text = normalize_label_text(best_text)
+                if normalized_text:
+                    label_items.append({
+                        "label": normalized_text,
+                        "number": normalized_text,
+                        "x1": px1,
+                        "y1": py1,
+                        "x2": px2,
+                        "y2": py2,
+                        "ocr_conf": best_conf,
+                        "yolo_conf": box_conf,
+                    })
+            elif best_text and best_conf >= ocr_conf:
                 char_items.append({
                     "char": best_text,
                     "x1": px1,
@@ -377,16 +731,27 @@ def recognize_one_image(
                     "yolo_conf": box_conf
                 })
 
-    grouped_results = group_chars_to_labels(
-        char_items,
-        y_tolerance=y_tolerance,
-        max_x_gap=max_x_gap,
-        max_label_length=MAX_LABEL_LENGTH
-    )
+    if use_yolo_label_groups:
+        grouped_results = sorted(
+            label_items,
+            key=lambda item: (item["y1"], item["x1"]),
+        )
+    else:
+        grouped_results = group_chars_to_labels(
+            char_items,
+            y_tolerance=y_tolerance,
+            max_x_gap=max_x_gap,
+            max_label_length=MAX_LABEL_LENGTH
+        )
 
     final_labels = [r["label"] for r in grouped_results]
 
-    recognition_mode_text = "YOLO 字元模型" if use_yolo_class_as_char else "YOLO + EasyOCR"
+    if use_yolo_class_as_char:
+        recognition_mode_text = "YOLO 字元模型"
+    elif use_yolo_label_groups:
+        recognition_mode_text = "YOLO 整組標號 + EasyOCR"
+    else:
+        recognition_mode_text = "YOLO + EasyOCR"
 
     result_text = (
         f"圖片名稱：{image_path.name}\n"
@@ -404,5 +769,6 @@ def recognize_one_image(
         "number_count": len(final_labels),
         "numbers": final_labels,
         "labels": final_labels,
+        "detections": grouped_results,
         "result_text": result_text
     }

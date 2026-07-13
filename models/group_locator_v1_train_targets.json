@@ -1,0 +1,540 @@
+{
+  "model": "patent_label_group_v1.pt",
+  "model_names": {
+    "0": "patent_label"
+  },
+  "split": "train",
+  "images": 16,
+  "imgsz": 1536,
+  "confidence": 0.25,
+  "nms_iou": 0.4,
+  "rotation_normalized": true,
+  "metrics": {
+    "iou30": {
+      "tp": 215,
+      "fp": 7,
+      "fn": 5,
+      "precision": 0.9684684684684685,
+      "recall": 0.9772727272727273,
+      "f1": 0.9728506787330317
+    },
+    "iou50": {
+      "tp": 213,
+      "fp": 9,
+      "fn": 7,
+      "precision": 0.9594594594594594,
+      "recall": 0.9681818181818181,
+      "f1": 0.9638009049773756
+    }
+  },
+  "pages": [
+    {
+      "page_id": "train_0003",
+      "ground_truth": 6,
+      "predictions": 6,
+      "ocr_detections": 6,
+      "matched": 6,
+      "correct_text": 4,
+      "labels": [
+        "3",
+        "2",
+        "4",
+        "IV",
+        "IV",
+        "4"
+      ]
+    },
+    {
+      "page_id": "train_0006",
+      "ground_truth": 6,
+      "predictions": 6,
+      "ocr_detections": 6,
+      "matched": 6,
+      "correct_text": 6,
+      "labels": [
+        "4",
+        "2",
+        "3",
+        "4",
+        "VII",
+        "VII"
+      ]
+    },
+    {
+      "page_id": "train_0010",
+      "ground_truth": 5,
+      "predictions": 5,
+      "ocr_detections": 5,
+      "matched": 5,
+      "correct_text": 5,
+      "labels": [
+        "6",
+        "5",
+        "2",
+        "XI",
+        "XI"
+      ]
+    },
+    {
+      "page_id": "train_0021",
+      "ground_truth": 16,
+      "predictions": 16,
+      "ocr_detections": 16,
+      "matched": 16,
+      "correct_text": 16,
+      "labels": [
+        "16",
+        "162",
+        "10",
+        "19",
+        "161",
+        "14",
+        "1",
+        "18",
+        "12",
+        "11",
+        "163",
+        "17",
+        "IV",
+        "13",
+        "IV",
+        "17"
+      ]
+    },
+    {
+      "page_id": "train_0024",
+      "ground_truth": 14,
+      "predictions": 14,
+      "ocr_detections": 14,
+      "matched": 14,
+      "correct_text": 14,
+      "labels": [
+        "17",
+        "VII",
+        "17",
+        "22",
+        "2",
+        "1",
+        "161",
+        "19",
+        "163",
+        "VII",
+        "10",
+        "10",
+        "162",
+        "18"
+      ]
+    },
+    {
+      "page_id": "train_0026",
+      "ground_truth": 16,
+      "predictions": 16,
+      "ocr_detections": 16,
+      "matched": 16,
+      "correct_text": 16,
+      "labels": [
+        "22",
+        "21",
+        "2",
+        "16",
+        "162",
+        "10",
+        "19",
+        "161",
+        "18",
+        "163",
+        "IX",
+        "1",
+        "111",
+        "11",
+        "13",
+        "IX"
+      ]
+    },
+    {
+      "page_id": "train_0031",
+      "ground_truth": 7,
+      "predictions": 7,
+      "ocr_detections": 7,
+      "matched": 7,
+      "correct_text": 4,
+      "labels": [
+        "11",
+        "10",
+        "12",
+        "II",
+        "1",
+        "1",
+        "1"
+      ]
+    },
+    {
+      "page_id": "train_0033",
+      "ground_truth": 23,
+      "predictions": 23,
+      "ocr_detections": 23,
+      "matched": 21,
+      "correct_text": 18,
+      "labels": [
+        "30",
+        "7",
+        "31",
+        "R8",
+        "32",
+        "83",
+        "331",
+        "33",
+        "LS",
+        "21",
+        "4",
+        "6",
+        "I",
+        "II",
+        "2",
+        "22",
+        "TS",
+        "T",
+        "I",
+        "II",
+        "23",
+        "1652",
+        "51C"
+      ]
+    },
+    {
+      "page_id": "train_0038",
+      "ground_truth": 24,
+      "predictions": 24,
+      "ocr_detections": 24,
+      "matched": 23,
+      "correct_text": 21,
+      "labels": [
+        "7",
+        "30",
+        "31",
+        "32",
+        "3",
+        "33",
+        "331",
+        "LS",
+        "6",
+        "4",
+        "I",
+        "330",
+        "21",
+        "2",
+        "22",
+        "TS",
+        "TS",
+        "R",
+        "I",
+        "II",
+        "T",
+        "652",
+        "51",
+        "23"
+      ]
+    },
+    {
+      "page_id": "train_0044",
+      "ground_truth": 11,
+      "predictions": 11,
+      "ocr_detections": 11,
+      "matched": 11,
+      "correct_text": 9,
+      "labels": [
+        "20'",
+        "212'",
+        "30",
+        "10'",
+        "L",
+        "213'",
+        "214",
+        "115'",
+        "112'",
+        "114'",
+        "L11'"
+      ]
+    },
+    {
+      "page_id": "train_0045",
+      "ground_truth": 8,
+      "predictions": 10,
+      "ocr_detections": 10,
+      "matched": 8,
+      "correct_text": 7,
+      "labels": [
+        "20'",
+        "21'",
+        "30",
+        "10'",
+        "L",
+        "5'",
+        "215'",
+        "12'",
+        "212",
+        "112'"
+      ]
+    },
+    {
+      "page_id": "train_0053",
+      "ground_truth": 22,
+      "predictions": 23,
+      "ocr_detections": 23,
+      "matched": 22,
+      "correct_text": 21,
+      "labels": [
+        "13",
+        "52",
+        "50",
+        "41",
+        "40",
+        "32",
+        "20",
+        "42",
+        "53",
+        "30",
+        "43",
+        "44",
+        "31",
+        "51",
+        "15",
+        "10",
+        "21",
+        "11",
+        "14",
+        "12",
+        "II",
+        "I",
+        "III"
+      ]
+    },
+    {
+      "page_id": "train_0056",
+      "ground_truth": 20,
+      "predictions": 20,
+      "ocr_detections": 20,
+      "matched": 20,
+      "correct_text": 20,
+      "labels": [
+        "V",
+        "52",
+        "50",
+        "42",
+        "44",
+        "31",
+        "40",
+        "41",
+        "30",
+        "43",
+        "21",
+        "32",
+        "53",
+        "50",
+        "51",
+        "II",
+        "V",
+        "III",
+        "60",
+        "I"
+      ]
+    },
+    {
+      "page_id": "train_0057",
+      "ground_truth": 10,
+      "predictions": 10,
+      "ocr_detections": 10,
+      "matched": 10,
+      "correct_text": 10,
+      "labels": [
+        "52",
+        "50",
+        "42",
+        "44",
+        "43",
+        "10",
+        "53",
+        "II",
+        "60",
+        "51"
+      ]
+    },
+    {
+      "page_id": "train_0094",
+      "ground_truth": 13,
+      "predictions": 13,
+      "ocr_detections": 13,
+      "matched": 12,
+      "correct_text": 11,
+      "labels": [
+        "1011",
+        "112",
+        "3",
+        "IV",
+        "3",
+        "12",
+        "212",
+        "22",
+        "21",
+        "2",
+        "4",
+        "4",
+        "IV"
+      ]
+    },
+    {
+      "page_id": "train_0099",
+      "ground_truth": 19,
+      "predictions": 18,
+      "ocr_detections": 18,
+      "matched": 17,
+      "correct_text": 14,
+      "labels": [
+        "2",
+        "III",
+        "201",
+        "21",
+        "200",
+        "112",
+        "100",
+        "203",
+        "111",
+        "30",
+        "12",
+        "15",
+        "L",
+        "13",
+        "112",
+        "1O",
+        "14",
+        "III"
+      ]
+    }
+  ],
+  "ocr": {
+    "matched_boxes": 214,
+    "correct_text": 196,
+    "accuracy_when_detected": 0.9158878504672897,
+    "end_to_end_recall": 0.8909090909090909,
+    "targets": {
+      "roman": {
+        "total": 25,
+        "detected": 25,
+        "correct": 23,
+        "end_to_end_recall": 0.92,
+        "by_text": {
+          "II": {
+            "total": 9,
+            "detected": 9,
+            "correct": 7,
+            "end_to_end_recall": 0.7777777777777778
+          },
+          "III": {
+            "total": 4,
+            "detected": 4,
+            "correct": 4,
+            "end_to_end_recall": 1.0
+          },
+          "IV": {
+            "total": 4,
+            "detected": 4,
+            "correct": 4,
+            "end_to_end_recall": 1.0
+          },
+          "IX": {
+            "total": 2,
+            "detected": 2,
+            "correct": 2,
+            "end_to_end_recall": 1.0
+          },
+          "VII": {
+            "total": 4,
+            "detected": 4,
+            "correct": 4,
+            "end_to_end_recall": 1.0
+          },
+          "XI": {
+            "total": 2,
+            "detected": 2,
+            "correct": 2,
+            "end_to_end_recall": 1.0
+          }
+        }
+      },
+      "prime": {
+        "total": 15,
+        "detected": 15,
+        "correct": 12,
+        "end_to_end_recall": 0.8,
+        "by_text": {
+          "10'": {
+            "total": 2,
+            "detected": 2,
+            "correct": 2,
+            "end_to_end_recall": 1.0
+          },
+          "111'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 0,
+            "end_to_end_recall": 0.0
+          },
+          "112'": {
+            "total": 2,
+            "detected": 2,
+            "correct": 2,
+            "end_to_end_recall": 1.0
+          },
+          "114'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 1,
+            "end_to_end_recall": 1.0
+          },
+          "115'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 1,
+            "end_to_end_recall": 1.0
+          },
+          "20'": {
+            "total": 2,
+            "detected": 2,
+            "correct": 2,
+            "end_to_end_recall": 1.0
+          },
+          "21'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 1,
+            "end_to_end_recall": 1.0
+          },
+          "212'": {
+            "total": 2,
+            "detected": 2,
+            "correct": 1,
+            "end_to_end_recall": 0.5
+          },
+          "213'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 1,
+            "end_to_end_recall": 1.0
+          },
+          "214'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 0,
+            "end_to_end_recall": 0.0
+          },
+          "215'": {
+            "total": 1,
+            "detected": 1,
+            "correct": 1,
+            "end_to_end_recall": 1.0
+          }
+        }
+      }
+    }
+  }
+}

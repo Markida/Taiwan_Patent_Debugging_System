@@ -151,6 +151,35 @@ QPushButton {
     line-height: 1.45;
 }
 
+#ResultText QScrollBar:vertical {
+    background: #eef2f7;
+    border: none;
+    border-radius: 8px;
+    width: 16px;
+    margin: 2px;
+}
+
+#ResultText QScrollBar::handle:vertical {
+    background: #94a3b8;
+    border-radius: 6px;
+    min-height: 42px;
+    margin: 2px;
+}
+
+#ResultText QScrollBar::handle:vertical:hover {
+    background: #64748b;
+}
+
+#ResultText QScrollBar::add-line:vertical,
+#ResultText QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+#ResultText QScrollBar::add-page:vertical,
+#ResultText QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
 #InputLine {
     background: #ffffff;
     color: #111827;

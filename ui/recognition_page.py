@@ -19,7 +19,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt
 
 from app.config import PDF_DPI, MAX_IMAGE_PREVIEW_ZOOM
-from app.paths import get_output_base_dir
+from app.paths import get_models_dir, get_output_base_dir
 
 from features.patent_ocr.ocr_engine import get_device_status_text
 from features.patent_ocr.ocr_worker import BatchRecognitionWorker
@@ -73,6 +73,11 @@ class RecognitionPage(QWidget):
         self.model_line.setPlaceholderText("請選擇 YOLO 模型，例如 best.pt")
         self.model_line.setObjectName("InputLine")
         self.model_line.setMaximumHeight(34)
+
+        recommended_model = get_models_dir() / "patent_label_group_v1.pt"
+        if recommended_model.exists():
+            self.model_path = str(recommended_model)
+            self.model_line.setText(self.model_path)
 
         self.model_button = QPushButton("選擇模型")
         self.model_button.setObjectName("ToolButton")
@@ -211,6 +216,7 @@ class RecognitionPage(QWidget):
 
         self.result_text = QTextEdit()
         self.result_text.setObjectName("ResultText")
+        self.result_text.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.result_text.setPlaceholderText(
             "辨識結果與標號清單比對結果會顯示在這裡。"
         )

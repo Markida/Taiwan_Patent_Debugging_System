@@ -1,0 +1,108 @@
+{
+  "dataset": "training/char_yolo/dataset",
+  "runtime_imgsz": 1536,
+  "real": {
+    "instances": 3373,
+    "width_percentiles_10_50_90": [
+      11.1,
+      21.89,
+      21.89
+    ],
+    "height_percentiles_10_50_90": [
+      10.29,
+      11.1,
+      21.89
+    ],
+    "selected_class_heights": {
+      "1": {
+        "count": 494,
+        "percentiles_10_50_90": [
+          10.29,
+          11.1,
+          21.89
+        ]
+      },
+      "I": {
+        "count": 16,
+        "percentiles_10_50_90": [
+          3.83,
+          3.83,
+          21.89
+        ]
+      },
+      "V": {
+        "count": 8,
+        "percentiles_10_50_90": [
+          9.94,
+          9.94,
+          21.89
+        ]
+      },
+      "X": {
+        "count": 0,
+        "percentiles_10_50_90": []
+      },
+      "prime": {
+        "count": 0,
+        "percentiles_10_50_90": []
+      }
+    }
+  },
+  "legacy_synthetic": {
+    "instances": 22456,
+    "width_percentiles_10_50_90": [
+      13.2,
+      27.6,
+      40.8
+    ],
+    "height_percentiles_10_50_90": [
+      22.8,
+      40.8,
+      58.8
+    ],
+    "selected_class_heights": {
+      "1": {
+        "count": 1579,
+        "percentiles_10_50_90": [
+          27.6,
+          43.2,
+          57.84
+        ]
+      },
+      "I": {
+        "count": 190,
+        "percentiles_10_50_90": [
+          26.4,
+          42.0,
+          57.6
+        ]
+      },
+      "V": {
+        "count": 177,
+        "percentiles_10_50_90": [
+          27.6,
+          42.0,
+          58.8
+        ]
+      },
+      "X": {
+        "count": 187,
+        "percentiles_10_50_90": [
+          26.4,
+          42.0,
+          58.8
+        ]
+      },
+      "prime": {
+        "count": 2039,
+        "percentiles_10_50_90": [
+          7.2,
+          10.8,
+          14.4
+        ]
+      }
+    }
+  },
+  "median_height_ratio_synthetic_to_real": 3.676,
+  "decision": "Legacy synthetic pages are excluded from the next model."
+}

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import easyocr
 
 from app.paths import get_easyocr_model_dir
@@ -38,7 +40,7 @@ def create_easyocr_reader(ocr_gpu):
             f"EasyOCR 模型檔不完整。\n\n"
             f"模型資料夾：{easyocr_model_dir}\n"
             f"缺少檔案：{', '.join(missing_files)}\n\n"
-            f"請從開發電腦的 C:\\Users\\jacky\\.EasyOCR\\model\\ "
+            f"請從開發電腦的 {Path.home() / '.EasyOCR' / 'model'} "
             f"複製缺少的 .pth 檔案到 easyocr_models。"
         )
 

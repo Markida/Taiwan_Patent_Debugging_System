@@ -1,0 +1,122 @@
+{
+  "model": "patent_label_group_v1.pt",
+  "model_names": {
+    "0": "patent_label"
+  },
+  "split": "val",
+  "images": 18,
+  "imgsz": 1536,
+  "confidence": 0.25,
+  "nms_iou": 0.4,
+  "rotation_normalized": true,
+  "metrics": {
+    "iou30": {
+      "tp": 283,
+      "fp": 11,
+      "fn": 7,
+      "precision": 0.9625850340136054,
+      "recall": 0.9758620689655172,
+      "f1": 0.9691780821917808
+    },
+    "iou50": {
+      "tp": 276,
+      "fp": 18,
+      "fn": 14,
+      "precision": 0.9387755102040817,
+      "recall": 0.9517241379310345,
+      "f1": 0.9452054794520548
+    }
+  },
+  "pages": [
+    {
+      "page_id": "val_0001",
+      "ground_truth": 16,
+      "predictions": 16
+    },
+    {
+      "page_id": "val_0002",
+      "ground_truth": 23,
+      "predictions": 23
+    },
+    {
+      "page_id": "val_0003",
+      "ground_truth": 11,
+      "predictions": 13
+    },
+    {
+      "page_id": "val_0004",
+      "ground_truth": 3,
+      "predictions": 3
+    },
+    {
+      "page_id": "val_0005",
+      "ground_truth": 11,
+      "predictions": 12
+    },
+    {
+      "page_id": "val_0006",
+      "ground_truth": 8,
+      "predictions": 8
+    },
+    {
+      "page_id": "val_0007",
+      "ground_truth": 27,
+      "predictions": 25
+    },
+    {
+      "page_id": "val_0008",
+      "ground_truth": 26,
+      "predictions": 26
+    },
+    {
+      "page_id": "val_0009",
+      "ground_truth": 29,
+      "predictions": 27
+    },
+    {
+      "page_id": "val_0010",
+      "ground_truth": 11,
+      "predictions": 11
+    },
+    {
+      "page_id": "val_0011",
+      "ground_truth": 9,
+      "predictions": 9
+    },
+    {
+      "page_id": "val_0012",
+      "ground_truth": 23,
+      "predictions": 23
+    },
+    {
+      "page_id": "val_0013",
+      "ground_truth": 4,
+      "predictions": 4
+    },
+    {
+      "page_id": "val_0014",
+      "ground_truth": 13,
+      "predictions": 13
+    },
+    {
+      "page_id": "val_0015",
+      "ground_truth": 31,
+      "predictions": 36
+    },
+    {
+      "page_id": "val_0016",
+      "ground_truth": 21,
+      "predictions": 21
+    },
+    {
+      "page_id": "val_0017",
+      "ground_truth": 2,
+      "predictions": 2
+    },
+    {
+      "page_id": "val_0018",
+      "ground_truth": 22,
+      "predictions": 22
+    }
+  ]
+}

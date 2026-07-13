@@ -22,6 +22,18 @@ def normalize_label_text(label_text):
     text = re.sub(r"[^0-9A-Za-z']", "", text)
     text = text.upper()
 
+    # Prime is a suffix in the supported patent-label grammar (for example
+    # 7' or 55'). OCR marks at the beginning or after a letter are drawing
+    # noise, not valid labels.
+    has_numeric_prime_suffix = (
+        text.endswith("'")
+        and len(text) >= 2
+        and text.rstrip("'")[-1:].isdigit()
+    )
+    text = text.replace("'", "")
+    if has_numeric_prime_suffix:
+        text += "'"
+
     if text.isdigit():
         text = text.lstrip("0") or "0"
 

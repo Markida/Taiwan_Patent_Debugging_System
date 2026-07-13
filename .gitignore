@@ -22,10 +22,22 @@ outputs/
 pdf_pages/
 rotated_images/
 result_txt/
+training/char_yolo/dataset/
+training/crop_classifier/review_dataset/
+training/crop_classifier/dataset/
+training/detector_yolo/clean_dataset/
+training/manual_annotation/annotation_set/
+training/manual_annotation/real_training_dataset/
+training/manual_annotation/locator_dataset_v3/
+training/manual_annotation/locator_dataset_v3_rotated/
+training/manual_annotation/group_locator_dataset_v1/
+training/manual_annotation/group_locator_dataset_v2/
+Ultralytics/
 
 # Large model files
 models/*.pt
 easyocr_models/*.pth
+models/locator_v*.json
 
 # Test / local files
 sample/output/

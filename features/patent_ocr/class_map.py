@@ -145,3 +145,21 @@ def is_yolo_char_model(model, class_map):
 
     except Exception:
         return False
+
+
+def is_yolo_label_model(model):
+    """Return whether a one-class model locates complete patent labels."""
+
+    try:
+        names = model.names
+        class_names = list(names.values()) if isinstance(names, dict) else list(names)
+        if len(class_names) != 1:
+            return False
+        normalized = str(class_names[0]).strip().lower().replace("-", "_")
+        return normalized in {
+            "patent_label",
+            "patent_label_group",
+            "label_group",
+        }
+    except Exception:
+        return False

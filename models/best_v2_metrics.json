@@ -1,0 +1,44 @@
+{
+  "model": "best_v2.pt",
+  "model_role": "single-class character locator",
+  "training_source": "manually cleaned real patent pages",
+  "training_images": 74,
+  "training_instances": 1880,
+  "validation_images": 18,
+  "validation_instances": 562,
+  "image_size": 1536,
+  "recommended_confidence": 0.25,
+  "recommended_nms_iou": 0.4,
+  "recommended_max_x_gap": 15,
+  "baseline": {
+    "model": "best.pt",
+    "precision": 0.929981,
+    "recall": 0.968964,
+    "f1": 0.949073,
+    "map50": 0.985662,
+    "map50_95": 0.839291
+  },
+  "candidate": {
+    "model": "best_v2.pt",
+    "precision": 0.939644,
+    "recall": 0.969558,
+    "f1": 0.954367,
+    "map50": 0.987788,
+    "map50_95": 0.850892
+  },
+  "ocr_crop_validation": {
+    "approved_crops": 626,
+    "correct": 625,
+    "accuracy": 0.998403,
+    "digits_correct": 515,
+    "digits_total": 515,
+    "letters_correct": 110,
+    "letters_total": 111,
+    "known_ambiguity": "I may be recognized as 1 without reference-list context"
+  },
+  "limitations": [
+    "Real prime-mark localization samples are still insufficient.",
+    "The characters J, K, M, O, P, Q, U and W are not covered by approved real crops.",
+    "Low-confidence parenthesis-to-6/7 confusions are filtered using thresholds validated on available real 6/7 crops."
+  ]
+}

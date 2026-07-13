@@ -1,0 +1,29 @@
+{
+  "model": "patent_char_v1.pt",
+  "classes": 37,
+  "epochs": 30,
+  "image_size": 1280,
+  "batch": 4,
+  "validation_images": 156,
+  "validation_instances": 4625,
+  "precision": 0.974,
+  "recall": 0.939,
+  "map50": 0.979,
+  "map50_95": 0.836,
+  "prime": {
+    "precision": 0.954,
+    "recall": 0.833,
+    "map50": 0.898,
+    "map50_95": 0.451
+  },
+  "holdout_targets": [
+    "A",
+    "B",
+    "10A",
+    "7'",
+    "8'",
+    "9'"
+  ],
+  "holdout_passed": true,
+  "limitation": "P/Q/W/X/Y/Z/prime have no extractable real samples in pdf-100 and currently rely on synthetic training and validation data."
+}
