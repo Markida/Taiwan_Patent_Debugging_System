@@ -1,0 +1,29 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Build output
+build/
+dist/
+*.dist/
+*.build/
+*.onefile-build/
+build_debug_cpu/
+build_release_cpu/
+
+# Output files
+outputs/
+pdf_pages/
+rotated_images/
+result_txt/
+
+# Large model files
+models/*.pt
+easyocr_models/*.pth
+
+# IDE / system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
