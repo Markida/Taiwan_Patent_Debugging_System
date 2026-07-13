@@ -12,6 +12,11 @@ dist/
 build_debug_cpu/
 build_release_cpu/
 
+# Nuitka output
+*.dist/
+*.build/
+*.onefile-build/
+
 # Output files
 outputs/
 pdf_pages/
@@ -21,6 +26,10 @@ result_txt/
 # Large model files
 models/*.pt
 easyocr_models/*.pth
+
+# Test / local files
+sample/output/
+*.log
 
 # IDE / system
 .vscode/
