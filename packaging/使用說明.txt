@@ -1,0 +1,28 @@
+Santo Patent OCR v1.05.1 — 公司離線版（CPU）
+================================================
+
+建議安裝方式
+1. 將收到的壓縮檔完整解壓縮到本機短路徑，例如：C:\SantoOCR
+2. 先雙擊 Offline_Check.bat。
+3. 看到 [PASS] 後，雙擊 SantoPatentOCR.exe 開始使用。
+
+重要事項
+- 必須保留整個 SantoOCR 資料夾，不能只複製 SantoPatentOCR.exe。
+- 不需要安裝 Python、Conda、CUDA，也不需要連上網路。
+- 適用 Windows 10/11 64 位元；所有辨識均使用 CPU。
+- 請先解壓縮到本機磁碟後再執行，不建議直接從 ZIP 或網路磁碟開啟。
+- 根目錄名稱和放置路徑請儘量簡短，以避開 Windows 傳統路徑長度限制。
+
+啟動備援
+- 正常情況請使用 SantoPatentOCR.exe。
+- 若公司的安全政策只封鎖自製 EXE，可嘗試 SantoPatentOCR_啟動.bat；它會直接呼叫包內的 Python，不會下載任何檔案。
+
+檢查失敗時
+- 請保留 Offline_Check.bat 畫面中的 JSON 報告或截圖。
+- 確認 app、runtime、SantoPatentOCR.exe 三者仍在同一層資料夾。
+- 請勿自行刪除 runtime 內看似無關的 DLL 或套件。
+
+此版本內附
+- 正式 ONNX 標號定位模型：patent_label_group_v1.onnx
+- 英數字與 prime mark OCR 權重：english_g2.pth
+- 完整 CPU Python / PySide6 / Torch / OpenCV 離線執行環境

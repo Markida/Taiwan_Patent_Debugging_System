@@ -23,6 +23,7 @@ from features.patent_ocr.class_map import (
     is_yolo_char_model,
     is_yolo_label_model,
 )
+from features.patent_ocr.image_io import read_image
 
 from features.patent_ocr.label_parser import normalize_label_text
 
@@ -326,6 +327,9 @@ def recognize_easyocr_character(
     if best_text and best_conf >= min_confidence:
         return best_text, best_conf
 
+    if not getattr(reader, "patent_detector_fallback_enabled", True):
+        return best_text, best_conf
+
     fallback_results = reader.readtext(
         processed_roi,
         allowlist=allowlist,
@@ -375,6 +379,9 @@ def recognize_easyocr_label(
             best_conf = 0.0
 
     if best_text and best_conf >= min_confidence:
+        return best_text, best_conf
+
+    if not getattr(reader, "patent_detector_fallback_enabled", True):
         return best_text, best_conf
 
     fallback_results = reader.readtext(
@@ -561,7 +568,7 @@ def recognize_one_image(
 
     image_path = Path(image_path)
 
-    img = cv2.imread(str(image_path))
+    img = read_image(image_path)
 
     if img is None:
         raise ValueError(f"圖片讀取失敗：{image_path}")

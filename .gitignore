@@ -11,6 +11,12 @@ dist/
 *.onefile-build/
 build_debug_cpu/
 build_release_cpu/
+build_offline_cpu/
+build_offline_cpu_ts/
+build_offline_cpu_min/
+build_offline_cpu_final/
+release/
+.nuitka_cache/
 
 # Nuitka output
 *.dist/
@@ -36,6 +42,8 @@ Ultralytics/
 
 # Large model files
 models/*.pt
+models/*.torchscript
+models/*.onnx
 easyocr_models/*.pth
 models/locator_v*.json
 

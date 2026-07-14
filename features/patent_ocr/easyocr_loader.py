@@ -1,8 +1,7 @@
 from pathlib import Path
 
-import easyocr
-
 from app.paths import get_easyocr_model_dir
+from features.patent_ocr.compact_ocr_reader import CompactEnglishReader
 
 
 def create_easyocr_reader(ocr_gpu):
@@ -19,15 +18,10 @@ def create_easyocr_reader(ocr_gpu):
         raise RuntimeError(
             f"找不到 EasyOCR 模型資料夾：{easyocr_model_dir}\n\n"
             f"請確認 SantoPatentOCR.exe 或 main.py 同層資料夾內有 easyocr_models。\n"
-            f"資料夾內至少應包含：\n"
-            f"- craft_mlt_25k.pth\n"
-            f"- english_g2.pth"
+            f"資料夾內至少應包含 english_g2.pth。"
         )
 
-    required_model_files = [
-        "craft_mlt_25k.pth",
-        "english_g2.pth"
-    ]
+    required_model_files = ["english_g2.pth"]
 
     missing_files = [
         file_name
@@ -44,11 +38,9 @@ def create_easyocr_reader(ocr_gpu):
             f"複製缺少的 .pth 檔案到 easyocr_models。"
         )
 
-    reader = easyocr.Reader(
-        ["en"],
+    reader = CompactEnglishReader(
+        easyocr_model_dir / "english_g2.pth",
         gpu=ocr_gpu,
-        model_storage_directory=str(easyocr_model_dir),
-        download_enabled=False
     )
 
     return reader

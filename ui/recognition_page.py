@@ -74,10 +74,15 @@ class RecognitionPage(QWidget):
         self.model_line.setObjectName("InputLine")
         self.model_line.setMaximumHeight(34)
 
-        recommended_model = get_models_dir() / "patent_label_group_v1.pt"
-        if recommended_model.exists():
-            self.model_path = str(recommended_model)
-            self.model_line.setText(self.model_path)
+        recommended_models = [
+            get_models_dir() / "patent_label_group_v1.onnx",
+            get_models_dir() / "patent_label_group_v1.pt",
+        ]
+        for recommended_model in recommended_models:
+            if recommended_model.exists():
+                self.model_path = str(recommended_model)
+                self.model_line.setText(self.model_path)
+                break
 
         self.model_button = QPushButton("選擇模型")
         self.model_button.setObjectName("ToolButton")
@@ -243,7 +248,7 @@ class RecognitionPage(QWidget):
             self,
             "選擇 YOLO 模型",
             "",
-            "YOLO Model (*.pt)"
+            "YOLO Model (*.onnx *.pt)"
         )
 
         if file_path:

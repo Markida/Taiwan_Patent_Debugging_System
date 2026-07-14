@@ -16,9 +16,9 @@ Patent drawing reference-label recognition and checklist comparison tool. The de
 
 ## Recognition architecture
 
-The recommended production model is `models/patent_label_group_v1.pt`. It detects an entire reference-label group as one `patent_label` box. EasyOCR then reads the contents of that box using only the bundled English detector and recognizer weights. This approach is more reliable for narrow Roman numerals and prime marks than detecting every character as a separate YOLO object.
+The recommended training/source model is `models/patent_label_group_v1.pt`; the portable release uses its exported `models/patent_label_group_v1.onnx`. It detects an entire reference-label group as one `patent_label` box. The compact English recognizer then reads the contents of that box using the bundled EasyOCR generation-2 recognition weight. This approach is more reliable for narrow Roman numerals and prime marks than detecting every character as a separate YOLO object.
 
-The application never downloads OCR weights at runtime. `download_enabled=False` is enforced so an offline company computer fails with a clear missing-file message instead of attempting network access.
+The group-level YOLO model already provides each complete text region, so the production reader runs in recognizer-only mode and does not need the separate CRAFT detector weight. The compact runtime loads `english_g2.pth` directly and contains no model-download path, so an offline company computer fails with a clear missing-file message instead of attempting network access.
 
 ## Source setup
 
@@ -44,7 +44,6 @@ Model weights are intentionally excluded from Git because they are large binary 
 models/
   patent_label_group_v1.pt
 easyocr_models/
-  craft_mlt_25k.pth
   english_g2.pth
 ```
 
@@ -75,7 +74,7 @@ The checked-in evaluation summaries for the recommended model are in `models/`. 
 
 ## Offline Windows release
 
-The release workflow builds a standalone CPU package containing the executable, Python runtime components, required native libraries, the production YOLO model, and both EasyOCR weights. The resulting folder can run without Python, Conda, administrator installation, or internet access. See `OFFLINE_RELEASE.md` after the packaging workflow is added.
+The release workflow builds a standalone CPU package containing the executable, Python runtime components, required native libraries, the production YOLO model, and the English EasyOCR recognizer weight. The resulting folder can run without Python, Conda, administrator installation, or internet access. See `OFFLINE_RELEASE.md` for the release layout and verification procedure.
 
 ## Privacy and repository policy
 

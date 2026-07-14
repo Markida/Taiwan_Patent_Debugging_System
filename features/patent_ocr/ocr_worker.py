@@ -1,10 +1,10 @@
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
-from ultralytics import YOLO
 
 from features.patent_ocr.class_map import load_class_map
 from features.patent_ocr.easyocr_loader import create_easyocr_reader
+from features.patent_ocr.model_loader import load_detection_model
 from features.patent_ocr.ocr_engine import (
     get_device_status_text,
     get_easyocr_gpu_flag,
@@ -34,7 +34,7 @@ class BatchRecognitionWorker(QThread):
                 f"正在載入 YOLO 模型...\n目前運算模式：{device_status}"
             )
 
-            model = YOLO(str(model_path_obj))
+            model = load_detection_model(model_path_obj)
 
             class_map = load_class_map(model_path_obj)
             use_yolo_class_as_char = should_use_yolo_class_as_char(model, class_map)
