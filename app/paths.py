@@ -25,7 +25,12 @@ def get_output_base_dir():
     避免安裝後寫入 Program Files 或 .dist 資料夾造成權限問題。
     """
 
-    output_dir = Path.home() / "Documents" / "SantoPatentOCR" / "outputs"
+    output_dir = (
+        Path.home()
+        / "Documents"
+        / "Saint-Island_Patent_MDS"
+        / "outputs"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 

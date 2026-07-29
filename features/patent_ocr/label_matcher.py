@@ -1,118 +1,130 @@
-from features.patent_ocr.label_parser import (
-    normalize_label_text,
-    format_reference_label
-)
+from html import escape
+
+from features.patent_ocr.label_parser import normalize_label_text
 
 
-IMAGE_RESULT_SEPARATOR = "----------------------------------------"
+def _label_character_sort_key(label):
+    """Sort labels one character at a time, preserving letter case."""
 
-
-def build_reference_comparison_text(all_results, reference_items):
-    """
-    將辨識結果與使用者輸入的標號清單進行比對。
-    """
-
-    if not reference_items:
-        return ""
-
-    expected_numbers = [item["number"] for item in reference_items]
-
-    reference_map = {
-        item["number"]: item.get("name", "")
-        for item in reference_items
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'"
+    character_order = {
+        character: index
+        for index, character in enumerate(alphabet)
     }
-
-    number_to_images = {
-        number: []
-        for number in expected_numbers
-    }
-
-    lines = []
-
-    lines.append("標號清單比對結果")
-    lines.append("")
-    lines.append(f"輸入標號數量：{len(expected_numbers)}")
-    lines.append(
-        "輸入標號列表：" +
-        ", ".join(format_reference_label(number, reference_map) for number in expected_numbers)
+    return tuple(
+        character_order.get(character, len(alphabet) + ord(character))
+        for character in normalize_label_text(label)
     )
 
-    lines.append("")
-    lines.append("【依圖片比對】")
 
-    for result_index, result in enumerate(all_results):
-        if result_index > 0:
-            lines.append("")
-            lines.append(IMAGE_RESULT_SEPARATOR)
+def _unique_normalized_numbers(numbers, sort_numbers=False):
+    normalized_numbers = []
+    seen = set()
 
-        image_name = result.get("image_name", "未知圖片")
-        recognized_numbers = result.get("numbers", [])
+    for number in numbers:
+        normalized = normalize_label_text(number)
+        if not normalized or normalized in seen:
+            continue
+        normalized_numbers.append(normalized)
+        seen.add(normalized)
 
-        normalized_recognized_numbers = []
-        recognized_set = set()
+    if sort_numbers:
+        normalized_numbers.sort(key=_label_character_sort_key)
+    return normalized_numbers
 
-        for number in recognized_numbers:
-            normalized = normalize_label_text(number)
-            if not normalized or normalized in recognized_set:
-                continue
-            normalized_recognized_numbers.append(normalized)
-            recognized_set.add(normalized)
 
-        present_numbers = [
+def _format_numbers(numbers):
+    if not numbers:
+        return "無"
+    return escape(", ".join(numbers))
+
+
+def _format_image_section(image_name, lines):
+    content = "<br>".join(escape(line_name) + _format_numbers(numbers) for line_name, numbers in lines)
+    return f"<div><strong>{escape(str(image_name))}</strong><br>{content}</div>"
+
+
+def build_result_summary_html(
+    all_results,
+    reference_items,
+    include_global_summary=True,
+    sort_numbers=False,
+):
+    """Build the compact rich-text summary shown after batch recognition."""
+
+    image_results = [
+        (
+            result.get("image_name", "未知圖片"),
+            _unique_normalized_numbers(
+                result.get("numbers", []),
+                sort_numbers=sort_numbers,
+            ),
+        )
+        for result in all_results
+    ]
+
+    separator = '<hr style="border: 0; border-top: 1px solid #9ca3af;">'
+
+    if not reference_items:
+        return separator.join(
+            _format_image_section(
+                image_name,
+                [("偵測到的標號：", detected_numbers)],
+            )
+            for image_name, detected_numbers in image_results
+        )
+
+    expected_numbers = _unique_normalized_numbers(
+        (item.get("number", "") for item in reference_items),
+        sort_numbers=sort_numbers,
+    )
+    expected_set = set(expected_numbers)
+
+    all_detected_numbers = []
+    all_detected_set = set()
+    for _, detected_numbers in image_results:
+        for number in detected_numbers:
+            if number not in all_detected_set:
+                all_detected_numbers.append(number)
+                all_detected_set.add(number)
+
+    missing_from_all_images = [
+        number for number in expected_numbers
+        if number not in all_detected_set
+    ]
+    absent_from_reference = [
+        number for number in all_detected_numbers
+        if number not in expected_set
+    ]
+
+    sections = []
+    if include_global_summary:
+        sections.append(
+            "<div><strong>All Pictures</strong><br>"
+            "標號清單有，但全部圖片都沒有出現："
+            f"{_format_numbers(missing_from_all_images)}<br>"
+            "有任意一張圖片出現，但標號清單沒有輸入："
+            f"{_format_numbers(absent_from_reference)}</div>"
+        )
+
+    for image_name, detected_numbers in image_results:
+        detected_set = set(detected_numbers)
+        missing_from_image = [
             number for number in expected_numbers
-            if number in recognized_set
+            if number not in detected_set
         ]
-
-        missing_numbers = [
-            number for number in expected_numbers
-            if number not in recognized_set
+        absent_from_reference_for_image = [
+            number for number in detected_numbers
+            if number not in expected_set
         ]
-
-        unexpected_numbers = [
-            number for number in normalized_recognized_numbers
-            if number not in reference_map
-        ]
-
-        for number in present_numbers:
-            number_to_images[number].append(image_name)
-
-        lines.append("")
-        lines.append(f"圖片名稱：{image_name}")
-
-        if present_numbers:
-            lines.append(
-                "有出現的標號：" +
-                ", ".join(format_reference_label(number, reference_map) for number in present_numbers)
+        sections.append(
+            _format_image_section(
+                image_name,
+                [
+                    ("標號清單有，圖片沒有：", missing_from_image),
+                    ("圖片有，標號清單沒有：", absent_from_reference_for_image),
+                ],
             )
-        else:
-            lines.append("有出現的標號：無")
+        )
 
-        if missing_numbers:
-            lines.append(
-                "未出現的標號：" +
-                ", ".join(format_reference_label(number, reference_map) for number in missing_numbers)
-            )
-        else:
-            lines.append("未出現的標號：無")
-
-        if unexpected_numbers:
-            lines.append(
-                "圖片中有出現，但是清單裡沒有出現的標號：" +
-                ", ".join(unexpected_numbers)
-            )
-        else:
-            lines.append("圖片中有出現，但是清單裡沒有出現的標號：無")
-
-    lines.append("")
-    lines.append("【依標號彙整】")
-
-    for number in expected_numbers:
-        label = format_reference_label(number, reference_map)
-        appeared_images = number_to_images.get(number, [])
-
-        if appeared_images:
-            lines.append(f"{label}：出現在 {', '.join(appeared_images)}")
-        else:
-            lines.append(f"{label}：未在任何圖片出現")
-
-    return "\n".join(lines)
+    return separator.join(sections)

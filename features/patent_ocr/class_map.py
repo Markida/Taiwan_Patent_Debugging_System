@@ -18,7 +18,7 @@ def get_default_class_map():
     for code in range(ord("A"), ord("Z") + 1):
         letter = chr(code)
         class_map[letter] = letter
-        class_map[letter.lower()] = letter
+        class_map[letter.lower()] = letter.lower()
 
     class_map.update({
         "prime": "'",
@@ -89,7 +89,7 @@ def normalize_detected_char(text):
         return text
 
     if len(text) == 1 and text.isalpha():
-        return text.upper()
+        return text
 
     if text.lower() in ["prime", "apostrophe"]:
         return "'"

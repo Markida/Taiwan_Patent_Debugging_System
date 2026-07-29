@@ -12,10 +12,10 @@ set "PATH=%ROOT%runtime;%ROOT%runtime\Library\bin;%ROOT%runtime\Scripts;%PATH%"
 
 if not exist "%ROOT%runtime\pythonw.exe" (
     echo [錯誤] 找不到內附的 Python 執行環境。
-    echo 請保留整個 SantoOCR 資料夾，不要只複製啟動檔。
+    echo 請保留整個 Saint-Island_Patent_MDS 資料夾，不要只複製啟動檔。
     pause
     exit /b 2
 )
 
-start "Santo Patent OCR" /wait "%ROOT%runtime\pythonw.exe" "%ROOT%app\main.py"
+start "Saint-Island Patent OCR" /wait "%ROOT%runtime\pythonw.exe" "%ROOT%app\main.py"
 exit /b %errorlevel%

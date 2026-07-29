@@ -48,6 +48,10 @@ class CharacterGroupingTests(unittest.TestCase):
         self.assertEqual(normalize_label_text("'42"), "42")
         self.assertEqual(normalize_label_text("X'"), "X")
 
+    def test_preserves_uppercase_and_lowercase_as_distinct_labels(self):
+        self.assertEqual(normalize_label_text("10A"), "10A")
+        self.assertEqual(normalize_label_text("10a"), "10a")
+
     def test_groups_number_and_letter(self):
         items = [
             char_item("1", 10, 20, 20, 40),
@@ -56,6 +60,15 @@ class CharacterGroupingTests(unittest.TestCase):
         ]
         results = group_chars_to_labels(items)
         self.assertEqual([item["label"] for item in results], ["10A"])
+
+    def test_groups_lowercase_without_promoting_it_to_uppercase(self):
+        items = [
+            char_item("1", 10, 20, 20, 40),
+            char_item("0", 22, 20, 34, 40),
+            char_item("a", 36, 20, 50, 40),
+        ]
+        results = group_chars_to_labels(items)
+        self.assertEqual([item["label"] for item in results], ["10a"])
 
     def test_attaches_prime_to_nearest_digit(self):
         items = [
@@ -85,6 +98,36 @@ class CharacterGroupingTests(unittest.TestCase):
         ]
         results = group_chars_to_labels(items, max_x_gap=15)
         self.assertEqual([item["label"] for item in results], ["331", "33"])
+
+    def test_adaptive_gap_keeps_tall_211_together(self):
+        items = [
+            char_item("2", 10, 20, 32, 82),
+            char_item("1", 48, 21, 62, 83),
+            char_item("1", 79, 19, 93, 81),
+        ]
+        results = group_chars_to_labels(items, max_x_gap=15)
+        self.assertEqual([item["label"] for item in results], ["211"])
+
+    def test_adaptive_gap_and_row_alignment_keep_151_together(self):
+        items = [
+            char_item("1", 10, 20, 24, 82),
+            char_item("5", 41, 27, 65, 88),
+            char_item("1", 82, 18, 96, 80),
+        ]
+        results = group_chars_to_labels(items, max_x_gap=15)
+        self.assertEqual([item["label"] for item in results], ["151"])
+
+    def test_adaptive_gap_does_not_cross_parentheses_in_211_21(self):
+        items = [
+            char_item("2", 10, 20, 32, 82),
+            char_item("1", 34, 20, 48, 82),
+            char_item("1", 50, 20, 64, 82),
+            # The omitted parentheses leave a wider horizontal gap.
+            char_item("2", 86, 20, 108, 82),
+            char_item("1", 110, 20, 124, 82),
+        ]
+        results = group_chars_to_labels(items, max_x_gap=15)
+        self.assertEqual([item["label"] for item in results], ["211", "21"])
 
 
 if __name__ == "__main__":

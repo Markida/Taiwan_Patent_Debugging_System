@@ -1,0 +1,318 @@
+{
+  "model": "C:\\Users\\jacky\\Patent number scratch\\PatentNumberOCR\\models\\patent_char_v4_company_approved_recall.pt",
+  "validation_images": 18,
+  "policy": {
+    "numeric_and_prime_minimum": 0.05,
+    "roman_ivx_minimum": 0.05,
+    "ordinary_letter_minimum": 0.2,
+    "j_minimum": 0.9
+  },
+  "baseline": {
+    "all": {
+      "tp": 565,
+      "fp": 25,
+      "fn": 15,
+      "precision": 0.9576271186440678,
+      "recall": 0.9741379310344828
+    },
+    "digits_and_prime": {
+      "tp": 510,
+      "fp": 7,
+      "fn": 2,
+      "precision": 0.9864603481624759,
+      "recall": 0.99609375
+    },
+    "roman_ivx": {
+      "tp": 19,
+      "fp": 2,
+      "fn": 12,
+      "precision": 0.9047619047619048,
+      "recall": 0.6129032258064516
+    },
+    "ordinary_letters": {
+      "tp": 36,
+      "fp": 16,
+      "fn": 1,
+      "precision": 0.6923076923076923,
+      "recall": 0.972972972972973
+    }
+  },
+  "candidate": {
+    "all": {
+      "tp": 562,
+      "fp": 15,
+      "fn": 18,
+      "precision": 0.9740034662045061,
+      "recall": 0.9689655172413794
+    },
+    "digits_and_prime": {
+      "tp": 510,
+      "fp": 7,
+      "fn": 2,
+      "precision": 0.9864603481624759,
+      "recall": 0.99609375
+    },
+    "roman_ivx": {
+      "tp": 19,
+      "fp": 2,
+      "fn": 12,
+      "precision": 0.9047619047619048,
+      "recall": 0.6129032258064516
+    },
+    "ordinary_letters": {
+      "tp": 33,
+      "fp": 6,
+      "fn": 4,
+      "precision": 0.8461538461538461,
+      "recall": 0.8918918918918919
+    }
+  },
+  "threshold_sweep": {
+    "0.15": {
+      "all": {
+        "tp": 562,
+        "fp": 17,
+        "fn": 18,
+        "precision": 0.9706390328151986,
+        "recall": 0.9689655172413794
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 33,
+        "fp": 8,
+        "fn": 4,
+        "precision": 0.8048780487804879,
+        "recall": 0.8918918918918919
+      }
+    },
+    "0.20": {
+      "all": {
+        "tp": 562,
+        "fp": 15,
+        "fn": 18,
+        "precision": 0.9740034662045061,
+        "recall": 0.9689655172413794
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 33,
+        "fp": 6,
+        "fn": 4,
+        "precision": 0.8461538461538461,
+        "recall": 0.8918918918918919
+      }
+    },
+    "0.25": {
+      "all": {
+        "tp": 561,
+        "fp": 15,
+        "fn": 19,
+        "precision": 0.9739583333333334,
+        "recall": 0.9672413793103448
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 32,
+        "fp": 6,
+        "fn": 5,
+        "precision": 0.8421052631578947,
+        "recall": 0.8648648648648649
+      }
+    },
+    "0.30": {
+      "all": {
+        "tp": 561,
+        "fp": 14,
+        "fn": 19,
+        "precision": 0.9756521739130435,
+        "recall": 0.9672413793103448
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 32,
+        "fp": 5,
+        "fn": 5,
+        "precision": 0.8648648648648649,
+        "recall": 0.8648648648648649
+      }
+    },
+    "0.35": {
+      "all": {
+        "tp": 561,
+        "fp": 13,
+        "fn": 19,
+        "precision": 0.9773519163763066,
+        "recall": 0.9672413793103448
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 32,
+        "fp": 4,
+        "fn": 5,
+        "precision": 0.8888888888888888,
+        "recall": 0.8648648648648649
+      }
+    },
+    "0.40": {
+      "all": {
+        "tp": 561,
+        "fp": 13,
+        "fn": 19,
+        "precision": 0.9773519163763066,
+        "recall": 0.9672413793103448
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 32,
+        "fp": 4,
+        "fn": 5,
+        "precision": 0.8888888888888888,
+        "recall": 0.8648648648648649
+      }
+    },
+    "0.45": {
+      "all": {
+        "tp": 561,
+        "fp": 13,
+        "fn": 19,
+        "precision": 0.9773519163763066,
+        "recall": 0.9672413793103448
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 32,
+        "fp": 4,
+        "fn": 5,
+        "precision": 0.8888888888888888,
+        "recall": 0.8648648648648649
+      }
+    },
+    "0.50": {
+      "all": {
+        "tp": 561,
+        "fp": 12,
+        "fn": 19,
+        "precision": 0.9790575916230366,
+        "recall": 0.9672413793103448
+      },
+      "digits_and_prime": {
+        "tp": 510,
+        "fp": 7,
+        "fn": 2,
+        "precision": 0.9864603481624759,
+        "recall": 0.99609375
+      },
+      "roman_ivx": {
+        "tp": 19,
+        "fp": 2,
+        "fn": 12,
+        "precision": 0.9047619047619048,
+        "recall": 0.6129032258064516
+      },
+      "ordinary_letters": {
+        "tp": 32,
+        "fp": 3,
+        "fn": 5,
+        "precision": 0.9142857142857143,
+        "recall": 0.8648648648648649
+      }
+    }
+  },
+  "change": {
+    "ordinary_letter_false_positives_removed": 10,
+    "ordinary_letter_true_positives_lost": 3,
+    "digit_and_prime_true_positives_lost": 0,
+    "roman_ivx_true_positives_lost": 0
+  }
+}

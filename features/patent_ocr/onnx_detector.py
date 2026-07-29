@@ -2,12 +2,50 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from features.patent_ocr.image_io import read_image
+
+
+def load_onnx_class_names(model_path):
+    """Load an optional class-order sidecar without requiring the onnx package."""
+
+    model_path = Path(model_path)
+    sidecar = model_path.with_suffix(".names.json")
+    if not sidecar.exists():
+        return {0: "patent_label"}
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        values = payload.get("names", payload) if isinstance(payload, dict) else payload
+        if isinstance(values, dict):
+            names = {int(index): str(name) for index, name in values.items()}
+        else:
+            names = {index: str(name) for index, name in enumerate(values)}
+    except Exception as error:
+        raise RuntimeError(f"Invalid ONNX class-name sidecar: {sidecar}") from error
+    if not names or sorted(names) != list(range(len(names))):
+        raise RuntimeError(f"ONNX class-name sidecar is incomplete: {sidecar}")
+    return names
+
+
+def load_onnx_network(model_path):
+    """Load ONNX with a Unicode-safe buffer fallback for Windows OpenCV."""
+
+    model_path = Path(model_path)
+    try:
+        return cv2.dnn.readNetFromONNX(str(model_path))
+    except cv2.error as path_error:
+        try:
+            model_bytes = np.fromfile(str(model_path), dtype=np.uint8)
+            if not model_bytes.size:
+                raise OSError(f"ONNX model is empty: {model_path}")
+            return cv2.dnn.readNetFromONNX(model_bytes)
+        except (OSError, ValueError, TypeError, cv2.error) as buffer_error:
+            raise RuntimeError(f"ONNX model load failed: {model_path}") from buffer_error
 
 
 class DetectionBox:
@@ -96,7 +134,8 @@ class OnnxDetector:
 
     def __init__(self, model_path):
         self.model_path = Path(model_path)
-        self.network = cv2.dnn.readNetFromONNX(str(self.model_path))
+        self.names = load_onnx_class_names(self.model_path)
+        self.network = load_onnx_network(self.model_path)
 
     def predict(
         self,

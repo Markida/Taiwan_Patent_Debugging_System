@@ -10,16 +10,18 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
-CLASS_NAMES = tuple("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ("prime",)
+BASE_CLASS_NAMES = tuple("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ("prime",)
+CLASS_NAMES = BASE_CLASS_NAMES
+EXTENDED_CLASS_NAMES = BASE_CLASS_NAMES + tuple("abcdefghijklmnopqrstuvwxyz")
 CLASS_TO_ID = {name: index for index, name in enumerate(CLASS_NAMES)}
 
 
 def normalize_label(value):
-    text = str(value or "").strip().upper()
+    text = str(value or "").strip()
 
-    if text in {"'", "PRIME", "′", "’", "`"}:
+    if text in {"'", "′", "’", "`"} or text.upper() == "PRIME":
         return "prime"
-    if len(text) == 1 and text in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    if len(text) == 1 and text in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
         return text
     return ""
 

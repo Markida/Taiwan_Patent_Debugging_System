@@ -1,0 +1,286 @@
+{
+  "validation_policy": "real manually-labelled validation pages only; the 500 raw TIPO val pages have no boxes",
+  "data": "C:\\Users\\jacky\\Patent number scratch\\PatentNumberOCR\\training\\char_yolo\\dataset_v4_company_approved\\data.yaml",
+  "models": [
+    {
+      "path": "C:\\Users\\jacky\\Patent number scratch\\PatentNumberOCR\\runs\\v4_company_approved\\patent_char_v4_company_approved\\weights\\epoch5.pt",
+      "sha256": "f37c6087878333b16d5c609c40fb771e8e94b4e0aca8c99634f93687c4ef7f72",
+      "overall": {
+        "metrics/precision(B)": 0.8329745826079729,
+        "metrics/recall(B)": 0.9576699846381534,
+        "metrics/mAP50(B)": 0.9739771809801144,
+        "metrics/mAP50-95(B)": 0.8676154730844112,
+        "fitness": 0.8676154730844112
+      },
+      "per_class_present_in_validation": {
+        "0": {
+          "precision": 0.9911002850378089,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9252183235867447
+        },
+        "1": {
+          "precision": 1.0,
+          "recall": 0.9330936411670201,
+          "mAP50": 0.9848275862068966,
+          "mAP50-95": 0.8821828389759971
+        },
+        "2": {
+          "precision": 0.9911599544554219,
+          "recall": 0.9665735628857423,
+          "mAP50": 0.9930913780397935,
+          "mAP50-95": 0.9379266827069586
+        },
+        "3": {
+          "precision": 1.0,
+          "recall": 0.9917794318831361,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9028451125786798
+        },
+        "4": {
+          "precision": 0.9658169291813662,
+          "recall": 0.9743580315399559,
+          "mAP50": 0.964483870967742,
+          "mAP50-95": 0.8848564387927691
+        },
+        "5": {
+          "precision": 1.0,
+          "recall": 0.895265009925366,
+          "mAP50": 0.995,
+          "mAP50-95": 0.93461368909817
+        },
+        "6": {
+          "precision": 0.9498437774052365,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.93645
+        },
+        "7": {
+          "precision": 0.9858950333813242,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.951375
+        },
+        "A": {
+          "precision": 0.42989434502369833,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "B": {
+          "precision": 0.41371227327022103,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8955
+        },
+        "C": {
+          "precision": 0.449059568624181,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "D": {
+          "precision": 0.6646386624218807,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8955
+        },
+        "I": {
+          "precision": 0.9828079411932582,
+          "recall": 0.6,
+          "mAP50": 0.6780952380952381,
+          "mAP50-95": 0.537516697518168
+        },
+        "L": {
+          "precision": 0.9444420920288905,
+          "recall": 0.75,
+          "mAP50": 0.9460227272727274,
+          "mAP50-95": 0.5268068181818182
+        },
+        "R": {
+          "precision": 0.8763718586862954,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8121666666666666
+        },
+        "S": {
+          "precision": 0.8842016664495764,
+          "recall": 1.0,
+          "mAP50": 0.962,
+          "mAP50-95": 0.7133
+        },
+        "T": {
+          "precision": 0.9123305065238224,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9116666666666667
+        },
+        "X": {
+          "precision": 0.6909532793079829,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "Y": {
+          "precision": 0.6802857925461516,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "Z": {
+          "precision": 0.7488344585189839,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "prime": {
+          "precision": 0.9311178107113274,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.597
+        }
+      },
+      "output": "C:\\Users\\jacky\\Patent number scratch\\PatentNumberOCR\\runs\\v4_company_approved\\evaluation\\compare_epoch5"
+    },
+    {
+      "path": "C:\\Users\\jacky\\Patent number scratch\\PatentNumberOCR\\runs\\v4_company_approved\\patent_char_v4_company_approved\\weights\\last.pt",
+      "sha256": "656db35e73a440b53e1296ef3829e7f73273fae945000fcd2848ea6cc62c4788",
+      "overall": {
+        "metrics/precision(B)": 0.8398103023620487,
+        "metrics/recall(B)": 0.956587584872796,
+        "metrics/mAP50(B)": 0.9781562395276683,
+        "metrics/mAP50-95(B)": 0.8714490770325339,
+        "fitness": 0.8714490770325339
+      },
+      "per_class_present_in_validation": {
+        "0": {
+          "precision": 0.9850660470805858,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9817037037037037
+        },
+        "1": {
+          "precision": 0.9972422710250746,
+          "recall": 0.9829059829059829,
+          "mAP50": 0.985,
+          "mAP50-95": 0.8997724244422644
+        },
+        "2": {
+          "precision": 0.9914241939144891,
+          "recall": 0.9966306879952255,
+          "mAP50": 0.9920940170940172,
+          "mAP50-95": 0.9328881460596372
+        },
+        "3": {
+          "precision": 0.9954002541942227,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9218843662423893
+        },
+        "4": {
+          "precision": 0.9580136940249088,
+          "recall": 1.0,
+          "mAP50": 0.9753333333333333,
+          "mAP50-95": 0.9228039004802856
+        },
+        "5": {
+          "precision": 1.0,
+          "recall": 0.9873529143534602,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9272688415457029
+        },
+        "6": {
+          "precision": 0.9584187112875325,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9547000000000001
+        },
+        "7": {
+          "precision": 0.8966981759975292,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.951375
+        },
+        "A": {
+          "precision": 0.5767550916014001,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "B": {
+          "precision": 0.4008910831818068,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8955
+        },
+        "C": {
+          "precision": 0.40499549126189793,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "D": {
+          "precision": 0.6856206598376133,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8955
+        },
+        "I": {
+          "precision": 1.0,
+          "recall": 0.6057235026594526,
+          "mAP50": 0.747187012987013,
+          "mAP50-95": 0.5892728715728717
+        },
+        "L": {
+          "precision": 1.0,
+          "recall": 0.8490595277479317,
+          "mAP50": 0.9816666666666668,
+          "mAP50-95": 0.5862499999999999
+        },
+        "R": {
+          "precision": 0.8969829527960105,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8949999999999999
+        },
+        "S": {
+          "precision": 0.9914459182372432,
+          "recall": 0.6666666666666666,
+          "mAP50": 0.935,
+          "mAP50-95": 0.6731363636363638
+        },
+        "T": {
+          "precision": 0.8664677685106856,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.900375
+        },
+        "X": {
+          "precision": 0.6718397697827816,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.9949999999999999
+        },
+        "Y": {
+          "precision": 0.6938220421943747,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.8955
+        },
+        "Z": {
+          "precision": 0.7247209229456979,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.796
+        },
+        "prime": {
+          "precision": 0.9402113017291667,
+          "recall": 1.0,
+          "mAP50": 0.995,
+          "mAP50-95": 0.6965
+        }
+      },
+      "output": "C:\\Users\\jacky\\Patent number scratch\\PatentNumberOCR\\runs\\v4_company_approved\\evaluation\\compare_last"
+    }
+  ]
+}

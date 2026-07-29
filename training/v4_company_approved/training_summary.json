@@ -1,0 +1,44 @@
+{
+  "status": "complete",
+  "dataset": {
+    "train_images": 3650,
+    "validation_images": 18,
+    "classes": 63,
+    "old_pseudo_labels_imported": false,
+    "prior_manual_records_verified": 400,
+    "prior_manual_images_imported": 391,
+    "exact_duplicate_images_skipped": 9
+  },
+  "training": {
+    "base_model": "models/patent_char_v3_consensus.pt",
+    "maximum_epochs": 15,
+    "completed_epochs": 8,
+    "early_stopping_patience": 5,
+    "imgsz": 1536,
+    "batch": 4,
+    "rotation_or_flip_augmentation": false
+  },
+  "candidates": {
+    "best_fitness": {
+      "path": "models/patent_char_v4_company_approved.pt",
+      "precision": 0.8986570579288311,
+      "recall": 0.9342880231141948,
+      "map50": 0.9802579216802857,
+      "map50_95": 0.8575476988780873,
+      "digit_1_recall": 0.9156676655563442
+    },
+    "high_recall": {
+      "path": "models/patent_char_v4_company_approved_recall.pt",
+      "offline_onnx": "models/patent_char_v4_company_approved_recall.onnx",
+      "precision": 0.8398103023620487,
+      "recall": 0.956587584872796,
+      "map50": 0.9781562395276683,
+      "map50_95": 0.8714490770325339,
+      "digit_1_recall": 0.9829059829059829
+    }
+  },
+  "deployment_decision": {
+    "automatic_gui_switch": false,
+    "reason": "The v4 high-recall checkpoint is the safer v4 candidate, but v3 still has slightly higher overall recall on the small manual validation set. Run company-image A/B testing before replacing the current default."
+  }
+}

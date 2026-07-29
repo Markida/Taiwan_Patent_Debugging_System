@@ -1,0 +1,11 @@
+# PyTorch is installed separately from the official CUDA 13.0 wheel index.
+# See install_training_v3.ps1.
+ultralytics==8.4.90
+opencv-python==5.0.0.93
+numpy==2.4.4
+pillow==12.2.0
+PyYAML==6.0.3
+onnx==1.22.0
+onnxruntime==1.27.0
+tensorboard==2.21.0
+pytest==9.1.1

@@ -16,5 +16,5 @@ python -m nuitka `
   --include-data-dir=models=models `
   --include-data-dir=easyocr_models=easyocr_models `
   --output-dir=build_release_cpu `
-  --output-filename=SantoPatentOCR.exe `
+  --output-filename=Saint-Island_Patent_MDS.exe `
   main.py

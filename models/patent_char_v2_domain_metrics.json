@@ -1,0 +1,102 @@
+{
+  "format_version": 2,
+  "model": {
+    "pt": "models/patent_char_v2_domain.pt",
+    "pt_bytes": 6428394,
+    "pt_sha256": "a92b9ba5c8534c570ec090276fd2e474ed3df22e508703be681f2beeb08a97be",
+    "onnx": "models/patent_char_v2_domain.onnx",
+    "onnx_bytes": 13066716,
+    "onnx_sha256": "4f9a1e006c90a1d9fcf2a95348b6d7bb6a2e5eef10b939bc1ace027495f67e3d",
+    "onnx_opset": 17,
+    "onnx_checker": "passed"
+  },
+  "training": {
+    "base_model": "models/patent_char_v1.pt",
+    "epochs": 80,
+    "best_epoch": 76,
+    "imgsz": 1536,
+    "rotation_augmentation": false,
+    "dataset": "training/char_yolo/dataset_v2_domain_matched/data.yaml"
+  },
+  "dataset": {
+    "train_images": 667,
+    "validation_images": 18,
+    "validation_character_instances": 580,
+    "validation_real_only": true,
+    "generated_or_augmented_validation_images": 0,
+    "generated_to_manual_median_height_ratio": 1.0,
+    "train_sources": {
+      "manual_real": 74,
+      "pdf_exact": 89,
+      "mild_real_augmentation": 74,
+      "domain_matched_composite": 370,
+      "hard_negative": 60
+    }
+  },
+  "real_only_character_validation": {
+    "new_model": {
+      "precision": 0.9101502193257073,
+      "recall": 0.8710492400404772,
+      "mAP50": 0.9518083947921225,
+      "mAP50-95": 0.8668028494658827
+    },
+    "old_model_same_images": {
+      "precision": 0.8005260150302052,
+      "recall": 0.3340794973634827,
+      "mAP50": 0.47927347982570073,
+      "mAP50-95": 0.38489942551778056
+    },
+    "new_minus_old": {
+      "precision": 0.10962420429550213,
+      "recall": 0.5369697426769946,
+      "mAP50": 0.4725349149664218,
+      "mAP50-95": 0.48190342394810215
+    }
+  },
+  "real_only_end_to_end_grouping_at_conf_0_20": {
+    "ground_truth_labels": 290,
+    "matched_labels": 276,
+    "correct_complete_text": 257,
+    "accuracy_when_matched": 0.9311594202898551,
+    "end_to_end_recall": 0.8862068965517241,
+    "prime": {
+      "total": 1,
+      "detected": 1,
+      "correct": 1,
+      "text": "55'"
+    },
+    "roman": {
+      "total": 6,
+      "detected": 6,
+      "correct": 3,
+      "note": "The real-only split currently contains II and III, but no IV/VII/VIII."
+    }
+  },
+  "validation_limitations": {
+    "classes_absent_from_real_validation": [
+      "8",
+      "9",
+      "E",
+      "F",
+      "G",
+      "H",
+      "J",
+      "K",
+      "M",
+      "N",
+      "O",
+      "P",
+      "Q",
+      "U",
+      "V",
+      "W"
+    ],
+    "low_sample_warning": "A/B/C/D/X/Y/Z/prime each have only one real validation instance.",
+    "recommended_next_feedback": "Export unseen coworker mistakes and add real IV/VII/VIII plus 7'/8'/9' examples before the next targeted fine-tune."
+  },
+  "reports": {
+    "dataset_build": "training/char_yolo/dataset_v2_domain_matched/build_report.json",
+    "old_new_comparison": "models/patent_char_v2_domain_comparison.json",
+    "end_to_end": "models/patent_char_v2_domain_e2e_report.json"
+  }
+}

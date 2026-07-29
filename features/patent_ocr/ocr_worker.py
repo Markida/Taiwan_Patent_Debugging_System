@@ -11,8 +11,6 @@ from features.patent_ocr.ocr_engine import (
     should_use_yolo_class_as_char,
     recognize_one_image
 )
-
-
 class BatchRecognitionWorker(QThread):
     progress_signal = Signal(str)
     finished_signal = Signal(object)
@@ -82,6 +80,9 @@ class BatchRecognitionWorker(QThread):
                     class_map=class_map,
                     use_yolo_class_as_char=use_yolo_class_as_char
                 )
+
+                result["original_image_path"] = str(image_path_obj)
+                result["rotation_degrees"] = 0
 
                 all_results.append(result)
 

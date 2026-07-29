@@ -1,17 +1,21 @@
-# Patent Number OCR
+# Saint-Island_Patent_MDS
 
-Patent drawing reference-label recognition and checklist comparison tool. The desktop application combines a YOLO label locator with offline EasyOCR recognition and supports images, multi-page PDFs, manual page rotation, batch comparison, and TXT export.
+Saint-Island Patent Mistake Detection System. The desktop application combines patent DOCX text checks with YOLO and offline EasyOCR drawing-label review. Document symbols can be handed directly to the image-recognition page for cross-checking.
 
 ## Current capabilities
 
 - Detect complete patent labels and recognize `0-9`, `A-Z`, and the prime mark `'`
 - Support labels such as `A`, `B`, `10A`, `IV`, `VIII`, and `7'`
-- Import multiple images or convert a PDF into page images
+- Import multiple images or convert a PDF into page images; PDF files can also be dragged directly onto the OCR page
 - Rotate individual pages by 90 degrees before recognition
 - Compare recognized labels with a manually entered checklist
+- Review a patent DOCX on a dedicated feature page without modifying the source file; DOCX files can be dragged directly onto the page
+- Show the exact error type, section, paragraph, character range, and original text location
+- Extract complete and representative-drawing symbol lists independently
+- Switch the OCR comparison between the two document-derived lists
 - Report labels missing from the image and labels found only in the image
 - Separate results by image and provide a persistent result scrollbar
-- Export complete batch results to UTF-8 TXT
+- Export OCR correction packages for model improvement
 - Provide a reusable `features/demo_tool/` feature-page template
 
 ## Recognition architecture
@@ -54,6 +58,7 @@ When the recommended YOLO model is present, the recognition page selects it auto
 ```text
 app/                         configuration, paths, styles, main window
 features/patent_ocr/         OCR, PDF, image, parsing, and comparison logic
+features/patent_review/      DOCX parsing, text rules, symbol handoff, cross-checking
 features/demo_tool/          reusable feature-module template
 ui/                          application pages
 models/                      class map, metrics, external YOLO weights
@@ -82,4 +87,4 @@ Training documents, generated datasets, model weights, OCR weights, output files
 
 ## Disclaimer
 
-This tool assists patent figure review and reference-label checking. Recognition output should still be reviewed by a person before it is used for formal work.
+This tool assists patent-document and figure review. It never creates or modifies a corrected Word document; users apply all formal revisions manually in the original Word file. Recognition and rule results should still be reviewed by a person before formal use.

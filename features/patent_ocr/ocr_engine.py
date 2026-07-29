@@ -1,16 +1,21 @@
 from pathlib import Path
+from statistics import median
 
 import cv2
 import torch
 
 from app.config import (
     YOLO_CONF,
+    V3_YOLO_CONF,
     YOLO_IOU,
     OCR_CONF,
     IMG_SIZE,
     PAD,
     OCR_ALLOWLIST,
     OCR_CHARACTER_MIN_CONFIDENCE,
+    V3_CHARACTER_MIN_CONFIDENCE,
+    OCR_LABEL_CHARACTER_MIN_CONFIDENCE,
+    J_MIN_DIGIT_HEIGHT_RATIO,
     Y_TOLERANCE,
     MAX_X_GAP,
     MAX_LABEL_LENGTH,
@@ -109,9 +114,44 @@ def clean_ocr_character(text, allowlist=OCR_ALLOWLIST):
     if allowlist and all(character.isdigit() for character in allowlist):
         return clean_ocr_text(text)
 
-    normalized = str(text).strip().upper()
+    normalized = str(text).strip()
     normalized = normalized.replace("’", "'").replace("′", "'").replace("`", "'")
-    return "".join(character for character in normalized if character in allowlist)
+    cleaned = []
+    for character in normalized:
+        if character in allowlist:
+            cleaned.append(character)
+        elif character.upper() in allowlist and character.lower() not in allowlist:
+            cleaned.append(character.upper())
+        elif character.lower() in allowlist and character.upper() not in allowlist:
+            cleaned.append(character.lower())
+    return "".join(cleaned)
+
+
+def is_v3_case_sensitive_char_model(model, use_yolo_class_as_char):
+    model_names = model.names
+    class_names = (
+        list(model_names.values())
+        if isinstance(model_names, dict)
+        else list(model_names)
+    )
+    return (
+        use_yolo_class_as_char
+        and len(class_names) == 63
+        and any(
+            len(str(name)) == 1 and str(name).islower()
+            for name in class_names
+        )
+    )
+
+
+def resolve_yolo_confidence(model, use_yolo_class_as_char, default=YOLO_CONF):
+    """Use the calibrated threshold only for the 63-class v3 character model."""
+
+    return (
+        V3_YOLO_CONF
+        if is_v3_case_sensitive_char_model(model, use_yolo_class_as_char)
+        else float(default)
+    )
 
 
 def preprocess_roi(roi):
@@ -409,9 +449,88 @@ def meets_character_confidence(
 
     required_confidence = max(
         float(min_confidence),
-        float(character_minimums.get(text, min_confidence)),
+        float(
+            character_minimums.get(
+                text,
+                character_minimums.get(str(text).upper(), min_confidence),
+            )
+        ),
     )
     return bool(text) and float(confidence) >= required_confidence
+
+
+def required_label_confidence(
+    text,
+    min_confidence=OCR_CONF,
+    character_minimums=OCR_LABEL_CHARACTER_MIN_CONFIDENCE,
+):
+    """Return the strictest OCR threshold required by a complete label."""
+
+    normalized_text = normalize_label_text(text)
+    return max(
+        [float(min_confidence)]
+        + [
+            float(character_minimums[character.upper()])
+            for character in normalized_text
+            if character.upper() in character_minimums
+        ]
+    )
+
+
+def meets_label_confidence(
+    text,
+    confidence,
+    min_confidence=OCR_CONF,
+    character_minimums=OCR_LABEL_CHARACTER_MIN_CONFIDENCE,
+):
+    """Reject high-risk letters such as false J strokes unless confident."""
+
+    return bool(text) and float(confidence) >= required_label_confidence(
+        text,
+        min_confidence=min_confidence,
+        character_minimums=character_minimums,
+    )
+
+
+def filter_small_j_detections(
+    detections,
+    min_digit_height_ratio=J_MIN_DIGIT_HEIGHT_RATIO,
+):
+    """Remove J labels that are materially shorter than numbers on the page."""
+
+    detections = list(detections or [])
+    digit_heights = [
+        max(0, float(item.get("y2", 0)) - float(item.get("y1", 0)))
+        for item in detections
+        if "J" not in str(item.get("label", "")).upper()
+        and any(character.isdigit() for character in str(item.get("label", "")))
+    ]
+    digit_heights = [height for height in digit_heights if height > 0]
+    if not digit_heights:
+        return detections, []
+
+    reference_height = float(median(digit_heights))
+    minimum_j_height = reference_height * float(min_digit_height_ratio)
+    accepted = []
+    rejected = []
+    for item in detections:
+        label = normalize_label_text(item.get("label", item.get("number", "")))
+        height = max(
+            0.0,
+            float(item.get("y2", 0)) - float(item.get("y1", 0)),
+        )
+        if "J" in label.upper() and height < minimum_j_height:
+            rejected_item = dict(item)
+            rejected_item["original_label"] = label
+            rejected_item["auto_filtered"] = True
+            rejected_item["rejection_reason"] = "j_smaller_than_numeric_labels"
+            rejected_item["j_height"] = round(height, 3)
+            rejected_item["reference_digit_height"] = round(reference_height, 3)
+            rejected_item["minimum_height_ratio"] = float(min_digit_height_ratio)
+            rejected.append(rejected_item)
+        else:
+            accepted.append(item)
+    return accepted, rejected
 
 
 def group_chars_to_labels(
@@ -457,6 +576,7 @@ def group_chars_to_labels(
 
             if "'" not in nearest_base["suffix"]:
                 nearest_base["suffix"] += "'"
+                nearest_base.setdefault("suffix_items", []).append(prime)
 
     if not base_items:
         return []
@@ -466,17 +586,43 @@ def group_chars_to_labels(
     rows = []
 
     for item in base_items:
-        placed = False
-
+        item_height = max(1.0, float(item["y2"] - item["y1"]))
+        matching_rows = []
         for row in rows:
-            row_y_avg = sum(d["yc"] for d in row) / len(row)
+            row_center = median(float(d["yc"]) for d in row)
+            row_height = median(
+                max(1.0, float(d["y2"] - d["y1"]))
+                for d in row
+            )
+            center_distance = abs(float(item["yc"]) - row_center)
+            adaptive_y_tolerance = min(
+                float(y_tolerance) * 2.0,
+                max(
+                    float(y_tolerance),
+                    0.35 * max(item_height, row_height),
+                ),
+            )
+            row_top = median(float(d["y1"]) for d in row)
+            row_bottom = median(float(d["y2"]) for d in row)
+            overlap = max(
+                0.0,
+                min(float(item["y2"]), row_bottom)
+                - max(float(item["y1"]), row_top),
+            )
+            overlap_ratio = overlap / max(
+                1.0,
+                min(item_height, row_bottom - row_top),
+            )
 
-            if abs(item["yc"] - row_y_avg) <= y_tolerance:
-                row.append(item)
-                placed = True
-                break
+            if (
+                center_distance <= adaptive_y_tolerance
+                and overlap_ratio >= 0.35
+            ):
+                matching_rows.append((center_distance, row))
 
-        if not placed:
+        if matching_rows:
+            min(matching_rows, key=lambda candidate: candidate[0])[1].append(item)
+        else:
             rows.append([item])
 
     grouped_char_lists = []
@@ -494,8 +640,16 @@ def group_chars_to_labels(
             prev = current_group[-1]
 
             gap = item["x1"] - prev["x2"]
+            pair_height = median([
+                max(1.0, float(prev["y2"] - prev["y1"])),
+                max(1.0, float(item["y2"] - item["y1"])),
+            ])
+            adaptive_x_gap = min(
+                float(max_x_gap) * 1.5,
+                max(float(max_x_gap), pair_height * 0.30),
+            )
 
-            if gap <= max_x_gap:
+            if gap <= adaptive_x_gap:
                 current_group.append(item)
             else:
                 grouped_char_lists.append(current_group)
@@ -526,14 +680,26 @@ def group_chars_to_labels(
         if len(label_text) > max_label_length:
             continue
 
+        confidence_items = list(group)
+        for character in group:
+            confidence_items.extend(character.get("suffix_items", []))
+        confidence_values = [
+            min(
+                float(character.get("ocr_conf", 0.0)),
+                float(character.get("yolo_conf", character.get("ocr_conf", 0.0))),
+            )
+            for character in confidence_items
+        ]
+
         results.append({
             "label": label_text,
             "number": label_text,
-            "x1": min(d["x1"] for d in group),
-            "y1": min(d["y1"] for d in group),
-            "x2": max(d["x2"] for d in group),
-            "y2": max(d["y2"] for d in group),
-            "chars": group
+            "x1": min(d["x1"] for d in confidence_items),
+            "y1": min(d["y1"] for d in confidence_items),
+            "x2": max(d["x2"] for d in confidence_items),
+            "y2": max(d["y2"] for d in confidence_items),
+            "chars": confidence_items,
+            "confidence": min(confidence_values) if confidence_values else 0.0,
         })
 
     # Rows and their groups are already built top-to-bottom and left-to-right.
@@ -577,10 +743,30 @@ def recognize_one_image(
 
     compute_device = get_compute_device()
 
+    effective_yolo_conf = resolve_yolo_confidence(
+        model,
+        use_yolo_class_as_char,
+        default=yolo_conf,
+    )
+    is_v3_case_sensitive_model = is_v3_case_sensitive_char_model(
+        model,
+        use_yolo_class_as_char,
+    )
+    character_minimums = (
+        V3_CHARACTER_MIN_CONFIDENCE
+        if is_v3_case_sensitive_model
+        else OCR_CHARACTER_MIN_CONFIDENCE
+    )
+    character_acceptance_confidence = (
+        effective_yolo_conf
+        if is_v3_case_sensitive_model
+        else ocr_conf
+    )
+
     results = model.predict(
         source=str(image_path),
         imgsz=imgsz,
-        conf=yolo_conf,
+        conf=effective_yolo_conf,
         iou=YOLO_IOU,
         device=compute_device,
         verbose=False
@@ -590,6 +776,7 @@ def recognize_one_image(
 
     char_items = []
     label_items = []
+    rejected_items = []
     use_yolo_label_groups = is_yolo_label_model(model)
 
     if boxes is not None and len(boxes) > 0:
@@ -648,9 +835,45 @@ def recognize_one_image(
                     )
                     label_candidates.append((candidate_text, candidate_conf))
 
-                best_text, best_conf = select_easyocr_label_candidate(
+                selected_text, selected_conf = select_easyocr_label_candidate(
                     label_candidates
                 )
+                selected_required_confidence = required_label_confidence(
+                    selected_text,
+                    min_confidence=ocr_conf,
+                )
+                if (
+                    selected_text
+                    and selected_required_confidence > float(ocr_conf)
+                    and selected_conf < selected_required_confidence
+                ):
+                    rejected_items.append({
+                        "label": selected_text,
+                        "original_label": selected_text,
+                        "x1": px1,
+                        "y1": py1,
+                        "x2": px2,
+                        "y2": py2,
+                        "ocr_conf": selected_conf,
+                        "yolo_conf": box_conf,
+                        "confidence": min(selected_conf, box_conf),
+                        "auto_filtered": True,
+                        "rejection_reason": "high_risk_character_confidence",
+                    })
+                    label_candidates = [
+                        candidate
+                        for candidate in label_candidates
+                        if meets_label_confidence(
+                            candidate[0],
+                            candidate[1],
+                            min_confidence=ocr_conf,
+                        )
+                    ]
+                    best_text, best_conf = select_easyocr_label_candidate(
+                        label_candidates
+                    )
+                else:
+                    best_text, best_conf = selected_text, selected_conf
 
                 # EasyOCR occasionally reads the first stroke of III as T or
                 # L. Only for this narrow ambiguous pattern, retry with the
@@ -724,8 +947,18 @@ def recognize_one_image(
                         "y2": py2,
                         "ocr_conf": best_conf,
                         "yolo_conf": box_conf,
+                        "confidence": min(best_conf, box_conf),
                     })
-            elif best_text and best_conf >= ocr_conf:
+            elif (
+                best_text
+                and best_conf >= character_acceptance_confidence
+                and meets_character_confidence(
+                    best_text,
+                    best_conf,
+                    min_confidence=character_acceptance_confidence,
+                    character_minimums=character_minimums,
+                )
+            ):
                 char_items.append({
                     "char": best_text,
                     "x1": px1,
@@ -750,6 +983,9 @@ def recognize_one_image(
             max_x_gap=max_x_gap,
             max_label_length=MAX_LABEL_LENGTH
         )
+
+    grouped_results, small_j_items = filter_small_j_detections(grouped_results)
+    rejected_items.extend(small_j_items)
 
     final_labels = [r["label"] for r in grouped_results]
 
@@ -777,5 +1013,6 @@ def recognize_one_image(
         "numbers": final_labels,
         "labels": final_labels,
         "detections": grouped_results,
+        "rejected_detections": rejected_items,
         "result_text": result_text
     }

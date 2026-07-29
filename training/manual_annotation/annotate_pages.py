@@ -1,4 +1,4 @@
-"""Full-page GUI for adding missed 0-9/A-Z/prime patent-character boxes."""
+"""GUI for adding missed 0-9/A-Z/a-z/prime patent-character boxes."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QKeySequence,
     QPainter,
@@ -41,7 +42,7 @@ from PySide6.QtWidgets import (
 try:
     from .common import (
         Annotation,
-        CLASS_NAMES,
+        EXTENDED_CLASS_NAMES,
         display_label,
         find_page_records,
         normalize_label,
@@ -52,7 +53,7 @@ try:
 except ImportError:
     from common import (
         Annotation,
-        CLASS_NAMES,
+        EXTENDED_CLASS_NAMES,
         display_label,
         find_page_records,
         normalize_label,
@@ -80,6 +81,10 @@ class AnnotationRectItem(QGraphicsRectItem):
         self.source = source
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setZValue(5)
+        # Keep the glyph permanently visible.  Relying on Qt's platform-
+        # dependent default brush can produce an opaque rectangle on some
+        # Windows graphics drivers/remote desktop sessions.
+        self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
 
         self.text_item = QGraphicsSimpleTextItem(display_label(label), self)
         self.text_item.setBrush(QColor(255, 255, 255))
@@ -102,8 +107,6 @@ class AnnotationRectItem(QGraphicsRectItem):
 
 
 class AnnotationView(QGraphicsView):
-    box_drawn = Signal(QRectF)
-
     def __init__(self):
         super().__init__()
         self.setScene(QGraphicsScene(self))
@@ -111,15 +114,28 @@ class AnnotationView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setBackgroundBrush(QColor(55, 55, 55))
+        # Transparent overlays and a persistent pixmap allow Qt to update only
+        # the damaged region. FullViewportUpdate can saturate the Windows event
+        # loop while the mouse is moving.
+        self.setViewportUpdateMode(
+            QGraphicsView.ViewportUpdateMode.SmartViewportUpdate
+        )
         self.draw_enabled = True
-        self.start_point = None
-        self.preview_item = None
+        self._rubber_from = None
+        self._rubber_to = None
+        self._rubber_rect = None
+        self._rubber_active = False
+        self.box_drawn_callback = None
         self.image_rect = QRectF()
+        # Let Qt's native code own the complete press/move/release sequence.
+        # Python only receives the resulting rectangle through this signal.
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.rubberBandChanged.connect(self._on_rubber_band_changed)
 
     def set_draw_enabled(self, enabled):
         self.draw_enabled = bool(enabled)
         self.setDragMode(
-            QGraphicsView.DragMode.NoDrag
+            QGraphicsView.DragMode.RubberBandDrag
             if self.draw_enabled
             else QGraphicsView.DragMode.ScrollHandDrag
         )
@@ -132,49 +148,30 @@ class AnnotationView(QGraphicsView):
             item = item.parentItem()
         return None
 
-    def mousePressEvent(self, event):
-        if (
-            self.draw_enabled
-            and event.button() == Qt.MouseButton.LeftButton
-            and self._annotation_item_at(event.position().toPoint()) is None
-        ):
-            point = self.mapToScene(event.position().toPoint())
-            if self.image_rect.contains(point):
-                self.scene().clearSelection()
-                self.start_point = point
-                self.preview_item = self.scene().addRect(
-                    QRectF(point, point),
-                    QPen(QColor(255, 60, 60), 2, Qt.PenStyle.DashLine),
-                )
-                self.preview_item.setZValue(20)
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self.start_point is not None and self.preview_item is not None:
-            current = self.mapToScene(event.position().toPoint())
-            rect = QRectF(self.start_point, current).normalized().intersected(self.image_rect)
-            self.preview_item.setRect(rect)
-            event.accept()
+    def _on_rubber_band_changed(self, viewport_rect, from_scene, to_scene):
+        if not self.draw_enabled:
             return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and self.start_point is not None
-            and self.preview_item is not None
-        ):
-            rect = self.preview_item.rect().normalized().intersected(self.image_rect)
-            self.scene().removeItem(self.preview_item)
-            self.preview_item = None
-            self.start_point = None
-            if rect.width() >= 2 and rect.height() >= 2:
-                self.box_drawn.emit(rect)
-            event.accept()
+        if not viewport_rect.isNull():
+            self._rubber_from = from_scene
+            self._rubber_to = to_scene
+            self._rubber_rect = QRectF(
+                self.mapToScene(viewport_rect.topLeft()),
+                self.mapToScene(viewport_rect.bottomRight()),
+            ).normalized().intersected(self.image_rect)
+            self._rubber_active = True
             return
-        super().mouseReleaseEvent(event)
+        if not self._rubber_active:
+            return
+        rect = self._rubber_rect
+        self._rubber_from = None
+        self._rubber_to = None
+        self._rubber_rect = None
+        self._rubber_active = False
+        if rect is None:
+            return
+        callback = self.box_drawn_callback
+        if callback is not None and rect.width() >= 2 and rect.height() >= 2:
+            callback(rect)
 
     def wheelEvent(self, event):
         factor = 1.2 if event.angleDelta().y() > 0 else 1 / 1.2
@@ -190,9 +187,13 @@ class AnnotationWindow(QMainWindow):
         self.current_record = None
         self.annotations = []
         self.box_items = []
+        self.current_pixmap = None
+        self.background_item = None
         self._syncing_selection = False
 
-        self.setWindowTitle("專利字元整頁人工標註（0-9 / A-Z / prime）")
+        self.setWindowTitle(
+            "專利字元人工標註（0-9 / A-Z / a-z / prime）"
+        )
         self.resize(1500, 900)
         self._build_ui()
         self._install_shortcuts()
@@ -200,7 +201,10 @@ class AnnotationWindow(QMainWindow):
 
     def _build_ui(self):
         self.view = AnnotationView()
-        self.view.box_drawn.connect(self.add_box)
+        # A direct Python callback avoids transferring QRectF ownership through
+        # a Python-defined Qt signal during a native mouse event. That signal
+        # path is unstable in the bundled Windows PySide6 runtime.
+        self.view.box_drawn_callback = self.add_box
         self.view.scene().selectionChanged.connect(self.on_scene_selection_changed)
 
         self.progress_label = QLabel()
@@ -220,9 +224,14 @@ class AnnotationWindow(QMainWindow):
         navigation.addWidget(import_button)
 
         self.label_combo = QComboBox()
-        for class_name in CLASS_NAMES:
+        for class_name in EXTENDED_CLASS_NAMES:
             self.label_combo.addItem(display_label(class_name), class_name)
         self.label_combo.setCurrentIndex(self.label_combo.findData("I"))
+
+        self.lowercase_checkbox = QCheckBox(
+            "小寫字母模式（a-z，Ctrl+L 切換）"
+        )
+        self.lowercase_checkbox.toggled.connect(self.on_case_mode_toggled)
 
         self.annotation_list = QListWidget()
         self.annotation_list.currentRowChanged.connect(self.on_list_selection_changed)
@@ -264,7 +273,8 @@ class AnnotationWindow(QMainWindow):
             "2. VIII 要分成 V、I、I、I 四個框。\n"
             "3. 7' 要分成 7 與 prime 兩個框。\n"
             "4. 綠框是既有建議、橘框是手動畫框；錯框請刪除。\n"
-            "5. 字母/數字鍵可快速切換目前標籤；滑鼠滾輪縮放。"
+            "5. 字母/數字鍵可快速切換目前標籤；滑鼠滾輪縮放。\n"
+            "6. 小寫字母請先勾選小寫模式；A 與 a 是不同 class。"
         )
         instructions.setWordWrap(True)
 
@@ -275,6 +285,7 @@ class AnnotationWindow(QMainWindow):
         sidebar.addLayout(navigation)
         sidebar.addWidget(QLabel("目前要畫的 class："))
         sidebar.addWidget(self.label_combo)
+        sidebar.addWidget(self.lowercase_checkbox)
         sidebar.addWidget(self.draw_mode_button)
         sidebar.addLayout(zoom_row)
         sidebar.addWidget(QLabel("本頁標註："))
@@ -312,17 +323,51 @@ class AnnotationWindow(QMainWindow):
         add_shortcut(Qt.Key.Key_PageDown, lambda: self.navigate(1))
         add_shortcut("Ctrl+Return", self.finish_page)
 
-        for class_name in tuple("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+        for class_name in tuple("0123456789"):
             add_shortcut(
                 class_name,
                 lambda value=class_name: self.select_current_label(value),
             )
+        for class_name in tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+            add_shortcut(
+                class_name,
+                lambda value=class_name: self.select_keyboard_letter(value),
+            )
         add_shortcut("'", lambda: self.select_current_label("prime"))
+        add_shortcut("Ctrl+L", self.toggle_lowercase_mode)
+
+    def select_keyboard_letter(self, uppercase_label):
+        label = (
+            uppercase_label.lower()
+            if self.lowercase_checkbox.isChecked()
+            else uppercase_label
+        )
+        self.select_current_label(label)
+
+    def toggle_lowercase_mode(self):
+        self.lowercase_checkbox.setChecked(
+            not self.lowercase_checkbox.isChecked()
+        )
+
+    def on_case_mode_toggled(self, lowercase_enabled):
+        current = str(self.label_combo.currentData() or "")
+        if len(current) == 1 and current.isalpha():
+            self.select_current_label(
+                current.lower() if lowercase_enabled else current.upper()
+            )
 
     def select_current_label(self, label):
         index = self.label_combo.findData(label)
         if index >= 0:
             self.label_combo.setCurrentIndex(index)
+        if (
+            hasattr(self, "lowercase_checkbox")
+            and len(str(label)) == 1
+            and str(label).isalpha()
+        ):
+            self.lowercase_checkbox.blockSignals(True)
+            self.lowercase_checkbox.setChecked(str(label).islower())
+            self.lowercase_checkbox.blockSignals(False)
 
     def reload_records(self, preferred_path=None):
         self.record_paths = find_page_records(self.annotation_root)
@@ -357,6 +402,10 @@ class AnnotationWindow(QMainWindow):
         pixmap = QPixmap(str(image_path))
         if pixmap.isNull():
             raise ValueError(f"Cannot load image: {image_path}")
+        # Keep an owned copy for the whole lifetime of the displayed record.
+        # Rebuilding annotation overlays must not depend on a temporary local
+        # QPixmap object.
+        self.current_pixmap = QPixmap(pixmap)
 
         self.current_record = record
         self.annotations = []
@@ -377,12 +426,31 @@ class AnnotationWindow(QMainWindow):
             return
         scene = self.view.scene()
         self.box_items = []
+        self.view._rubber_from = None
+        self.view._rubber_to = None
+        self.view._rubber_rect = None
+        self.view._rubber_active = False
         scene.clear()
 
-        if pixmap is None:
-            pixmap = QPixmap(str(self.annotation_root / self.current_record["image_path"]))
-        scene.addPixmap(pixmap).setZValue(-10)
-        self.view.image_rect = QRectF(0, 0, pixmap.width(), pixmap.height())
+        if pixmap is not None:
+            self.current_pixmap = QPixmap(pixmap)
+        if self.current_pixmap is None or self.current_pixmap.isNull():
+            self.current_pixmap = QPixmap(
+                str(self.annotation_root / self.current_record["image_path"])
+            )
+        if self.current_pixmap.isNull():
+            raise ValueError(
+                f"Cannot reload image: {self.current_record['image_path']}"
+            )
+        self.background_item = scene.addPixmap(self.current_pixmap)
+        self.background_item.setZValue(-1000)
+        self.background_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.view.image_rect = QRectF(
+            0,
+            0,
+            self.current_pixmap.width(),
+            self.current_pixmap.height(),
+        )
         scene.setSceneRect(self.view.image_rect)
 
         self.annotation_list.blockSignals(True)
@@ -426,25 +494,46 @@ class AnnotationWindow(QMainWindow):
         label = self.current_label()
         if not label or self.current_record is None:
             return
-        self.annotations.append(
-            Annotation(
-                label=label,
-                x1=rect.left(),
-                y1=rect.top(),
-                x2=rect.right(),
-                y2=rect.bottom(),
-                source="manual",
-            )
+        annotation = Annotation(
+            label=label,
+            x1=rect.left(),
+            y1=rect.top(),
+            x2=rect.right(),
+            y2=rect.bottom(),
+            source="manual",
         )
-        self.sort_annotations()
-        selected = self.annotations.index(
-            min(
-                self.annotations,
-                key=lambda item: abs(item.x1 - rect.left()) + abs(item.y1 - rect.top()),
-            )
+        # Append incrementally instead of clearing/rebuilding QGraphicsScene
+        # from a mouse-release callback.  Rebuilding here can invalidate Qt's
+        # current mouse/paint objects and crash on Windows/PySide6.
+        self.annotations.append(annotation)
+        selected = len(self.annotations) - 1
+        item = AnnotationRectItem(
+            QRectF(
+                annotation.x1,
+                annotation.y1,
+                annotation.x2 - annotation.x1,
+                annotation.y2 - annotation.y1,
+            ),
+            annotation_index=selected,
+            label=annotation.label,
+            source=annotation.source,
         )
+        self.view.scene().addItem(item)
+        self.box_items.append(item)
+
+        self.annotation_list.blockSignals(True)
+        self.annotation_list.addItem(
+            f"{selected + 1:03d}  {display_label(annotation.label):>5}  "
+            f"({annotation.x1:.0f},{annotation.y1:.0f})"
+        )
+        self.annotation_list.blockSignals(False)
+
         self.reviewed_checkbox.setChecked(False)
-        self.rebuild_scene(fit=False, selected_index=selected)
+        self.view.scene().clearSelection()
+        item.setSelected(True)
+        item.update_style()
+        self.annotation_list.setCurrentRow(selected)
+        self.update_summary()
 
     def selected_index(self):
         selected = [item for item in self.box_items if item.isSelected()]

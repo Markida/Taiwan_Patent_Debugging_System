@@ -180,6 +180,26 @@ QPushButton {
     background: transparent;
 }
 
+#ReviewTable {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    gridline-color: #dbe3ec;
+    selection-background-color: #bfdbfe;
+    selection-color: #111827;
+}
+
+#ReviewTable QHeaderView::section {
+    background: #e7eef8;
+    color: #0f2742;
+    border: none;
+    border-right: 1px solid #cbd5e1;
+    border-bottom: 1px solid #cbd5e1;
+    padding: 5px;
+    font-weight: 700;
+}
+
 #InputLine {
     background: #ffffff;
     color: #111827;
@@ -223,6 +243,17 @@ QPushButton {
 #SecondaryButton:hover {
     background-color: #d6e4f5;
     color: #0f2742;
+}
+
+#SecondaryButton:checked {
+    background-color: #2563eb;
+    color: #ffffff;
+    border-color: #1d4ed8;
+}
+
+#SecondaryButton:checked:hover {
+    background-color: #1d4ed8;
+    color: #ffffff;
 }
 
 #SecondaryButton:disabled {

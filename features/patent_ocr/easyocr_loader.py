@@ -17,7 +17,7 @@ def create_easyocr_reader(ocr_gpu):
     if not easyocr_model_dir.exists():
         raise RuntimeError(
             f"找不到 EasyOCR 模型資料夾：{easyocr_model_dir}\n\n"
-            f"請確認 SantoPatentOCR.exe 或 main.py 同層資料夾內有 easyocr_models。\n"
+            f"請確認 Saint-Island_Patent_MDS.exe 所在程式資料夾內有 easyocr_models。\n"
             f"資料夾內至少應包含 english_g2.pth。"
         )
 

@@ -20,7 +20,6 @@ def normalize_label_text(label_text):
     text = text.replace("`", "'")
 
     text = re.sub(r"[^0-9A-Za-z']", "", text)
-    text = text.upper()
 
     # Prime is a suffix in the supported patent-label grammar (for example
     # 7' or 55'). OCR marks at the beginning or after a letter are drawing

@@ -1,8 +1,15 @@
 from ui.recognition_page import RecognitionPage
 from ui.demo_tool_page import DemoToolPage
+from ui.patent_review_page import PatentReviewPage
 
 
 FEATURES = [
+    {
+        "id": "patent_review",
+        "title": "專利文件偵錯",
+        "description": "檢核完整專利說明書並將符號清單送往圖片標號識別",
+        "page_class": PatentReviewPage
+    },
     {
         "id": "patent_ocr",
         "title": "圖片標號識別",

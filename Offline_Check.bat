@@ -1,32 +1,38 @@
 @echo off
-setlocal
-chcp 65001 >nul
+setlocal EnableExtensions
 
+rem Keep this batch file ASCII-only so it works on every Windows CMD code page.
 set "APP_DIR=%~dp0"
-set "REPORT=%TEMP%\SantoPatentOCR_offline_check.json"
+set "REPORT=%TEMP%\Saint-IslandPatentOCR_offline_check.json"
+set "APP_EXE=%APP_DIR%Saint-Island_Patent_MDS.exe"
 
-if not exist "%APP_DIR%SantoPatentOCR.exe" (
-    echo [錯誤] 找不到 SantoPatentOCR.exe
+if not exist "%APP_EXE%" set "APP_EXE=%APP_DIR%Saint-IslandPatentOCR.exe"
+if not exist "%APP_EXE%" set "APP_EXE=%APP_DIR%SantoPatentOCR.exe"
+
+if not exist "%APP_EXE%" (
+    echo [ERROR] Saint-Island_Patent_MDS.exe was not found beside Offline_Check.bat.
+    echo Keep the EXE, app, and runtime folders in the same directory.
     pause
     exit /b 1
 )
 
 if exist "%REPORT%" del /q "%REPORT%"
-start "" /wait "%APP_DIR%SantoPatentOCR.exe" --offline-self-test "%REPORT%"
+"%APP_EXE%" --offline-self-test "%REPORT%"
 set "RESULT=%ERRORLEVEL%"
 
 if exist "%REPORT%" (
     type "%REPORT%"
 ) else (
-    echo [錯誤] 程式沒有產生環境檢查報告。
+    echo [ERROR] The application did not create an offline-check report.
     set "RESULT=1"
 )
 
 echo.
 if "%RESULT%"=="0" (
-    echo [PASS] 離線環境檢查通過。
+    echo [PASS] Offline environment check passed.
 ) else (
-    echo [FAILED] 離線環境檢查失敗，請保留上方報告。
+    echo [FAILED] Offline environment check failed. Keep the report above.
 )
+
 pause
 exit /b %RESULT%

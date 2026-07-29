@@ -24,15 +24,15 @@ class HomePage(QWidget):
         layout.setContentsMargins(70, 70, 70, 70)
         layout.setSpacing(24)
 
-        title = QLabel("聖島專利")
+        title = QLabel("Saint-Island_Patent_MDS")
         title.setAlignment(Qt.AlignCenter)
         title.setObjectName("HomeTitle")
 
-        subtitle = QLabel("Patent Intelligence Utility Suite")
+        subtitle = QLabel("Patent Mistake Detection System")
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setObjectName("HomeSubtitle")
 
-        description = QLabel("專利圖式處理、標號識別、資料比對與未來擴充工具平台")
+        description = QLabel("專利文件與圖式處理、錯誤檢核、標號識別及資料比對平台")
         description.setAlignment(Qt.AlignCenter)
         description.setObjectName("HomeDescription")
 

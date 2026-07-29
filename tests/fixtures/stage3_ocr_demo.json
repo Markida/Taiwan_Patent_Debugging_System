@@ -1,0 +1,24 @@
+{
+  "all_results": [
+    {
+      "image_name": "Pic_01",
+      "detections": [
+        {"label": "1", "confidence": 0.98},
+        {"label": "10", "confidence": 0.94},
+        {"label": "11", "confidence": 0.55},
+        {"label": "20", "confidence": 0.91},
+        {"label": "99", "confidence": 0.88}
+      ]
+    },
+    {
+      "image_name": "Pic_02",
+      "detections": [
+        {"label": "21", "confidence": 0.93},
+        {"label": "22", "confidence": 0.90},
+        {"label": "23", "confidence": 0.89},
+        {"label": "30", "confidence": 0.92},
+        {"label": "41", "confidence": 0.42, "manually_corrected": true}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+format_version: 1
+seed: 20260727
+
+paths:
+  corpus: training/data_collection/saint_island_latest_300_20260727/preprocessed_corpus
+  base_dataset: training/char_yolo/dataset_v2_domain_matched
+  output_dataset: training/char_yolo/dataset_v4_company_approved
+  work: training/v4_company_approved/work
+  manual_review: training/v4_company_approved/manual_review
+  runs: runs/v4_company_approved
+  group_model: models/patent_label_group_v1.pt
+  teacher_v1: models/patent_char_v1.pt
+  teacher_v2: models/patent_char_v2_domain.pt
+  export_model: models/patent_char_v4_company_approved.pt
+
+dataset:
+  source_split: train
+  holdout_split: val
+  expected_split_counts:
+    train: 1177
+    val: 175
+    blank_page_excluded: 3
+  group_imgsz: 1536
+  group_confidence: 0.08
+  group_iou: 0.45
+  crop_padding_ratio: 0.08
+  crop_padding_min_px: 6
+  page_margin_top_ratio: 0.07
+  page_margin_bottom_ratio: 0.06
+  teacher_imgsz: 1536
+  teacher_confidence_floor: 0.08
+  teacher_iou: 0.45
+  agreement_iou: 0.35
+  consensus_min_v1: 0.12
+  consensus_min_v2: 0.10
+  v2_only_minimum: 0.72
+  v1_only_minimum: 0.92
+  zero_minimum: 0.94
+  j_minimum: 0.95
+  prime_minimum: 0.82
+  zero_min_height_ratio: 0.65
+  j_min_height_ratio: 0.90
+  review_limit: 1600
+  manual_review_target: 400
+
+training:
+  model: models/patent_char_v3_consensus.pt
+  optional_larger_model: models/pretrained/yolov8s.pt
+  epochs: 15
+  imgsz: 1536
+  batch: 4
+  workers: 4
+  patience: 5
+  optimizer: AdamW
+  lr0: 0.001
+  weight_decay: 0.0005
+  close_mosaic: 10
+  save_period: 5
