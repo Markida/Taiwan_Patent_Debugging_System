@@ -1,4 +1,11 @@
 import re
+import unicodedata
+
+
+_STANDARD_LABEL = re.compile(r"^[0-9A-Za-z]+(?:')?$")
+_REFERENCE_SPECIAL_LABEL = re.compile(
+    r"^[^\s:：.．,，、~～\-()（）]+$"
+)
 
 
 def normalize_label_text(label_text):
@@ -39,6 +46,25 @@ def normalize_label_text(label_text):
     return text
 
 
+def normalize_reference_label_text(label_text):
+    """Normalize document-list labels while preserving literal symbols."""
+
+    text = re.sub(
+        r"\s+",
+        "",
+        unicodedata.normalize("NFKC", str(label_text).strip()),
+    )
+    text = text.replace("’", "'").replace("′", "'").replace("＇", "'")
+    if _STANDARD_LABEL.fullmatch(text):
+        return normalize_label_text(text)
+    if (
+        _REFERENCE_SPECIAL_LABEL.fullmatch(text)
+        and re.search(r"[\u3400-\u9fff]", text) is None
+    ):
+        return text
+    return ""
+
+
 def parse_reference_items(input_text):
     """
     從使用者輸入的標號清單中擷取標號。
@@ -60,7 +86,7 @@ def parse_reference_items(input_text):
             continue
 
         match = re.match(
-            r"^\s*([0-9A-Za-z]+(?:['’′])?)\s*[:：]\s*(.*?)\s*$",
+            r"^\s*([^\s:：.．,，、~～\-()（）]+)\s*[:：]\s*(.*?)\s*$",
             line
         )
 
@@ -79,7 +105,7 @@ def parse_reference_items(input_text):
         if not match:
             continue
 
-        label = normalize_label_text(match.group(1))
+        label = normalize_reference_label_text(match.group(1))
 
         if not label:
             continue

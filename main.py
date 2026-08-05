@@ -7,8 +7,10 @@ os.environ["MKL_NUM_THREADS"] = "1"
 
 import sys
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 from app.main_window import MainWindow
+from app.paths import get_app_icon_path
 from features.patent_ocr.offline_self_test import run_offline_self_test
 
 
@@ -26,6 +28,10 @@ def main():
 
     if app is None:
         app = QApplication(sys.argv)
+
+    icon_path = get_app_icon_path()
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     window = MainWindow()
     window.show()

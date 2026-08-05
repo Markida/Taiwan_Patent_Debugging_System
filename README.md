@@ -11,11 +11,13 @@ Saint-Island Patent Mistake Detection System. The desktop application combines p
 - Compare recognized labels with a manually entered checklist
 - Review a patent DOCX on a dedicated feature page without modifying the source file; DOCX files can be dragged directly onto the page
 - Show the exact error type, section, paragraph, character range, and original text location
+- Add persistent exact-text review rules such as `的的` or `個個`; saved rules load automatically on later runs
 - Extract complete and representative-drawing symbol lists independently
 - Switch the OCR comparison between the two document-derived lists
 - Report labels missing from the image and labels found only in the image
 - Separate results by image and provide a persistent result scrollbar
 - Export OCR correction packages for model improvement
+- Continue from the next OCR label automatically after deleting a reviewed label
 - Provide a reusable `features/demo_tool/` feature-page template
 
 ## Recognition architecture

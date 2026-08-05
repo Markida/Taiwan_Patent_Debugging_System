@@ -1,12 +1,15 @@
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QPoint
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QApplication
 
+from app.workflow_context import PatentWorkflowContext
 from features.patent_review.symbol_transfer import (
     DocumentSymbolTransfer,
     PatentSymbolEntry,
@@ -58,6 +61,12 @@ class RecognitionReviewPageTests(unittest.TestCase):
     def tearDown(self):
         self.page.deleteLater()
 
+    def test_default_model_is_v1(self):
+        self.assertEqual(
+            Path(self.page.model_path).name,
+            "patent_label_group_v1.onnx",
+        )
+
     def test_low_confidence_row_is_red_and_editable(self):
         label_item = self.page.review_table.item(0, LABEL_COLUMN)
         status_item = self.page.review_table.item(0, STATUS_COLUMN)
@@ -71,18 +80,46 @@ class RecognitionReviewPageTests(unittest.TestCase):
         self.assertEqual(reviewed[0]["numbers"], ["8", "2"])
         self.assertTrue(reviewed[0]["detections"][0]["manual_edited"])
 
+    def test_delete_selects_the_next_label_for_continuous_review(self):
+        self.page.review_table.selectRow(0)
+        deleted_label = self.page.review_table.item(0, LABEL_COLUMN).text()
+
+        self.page.delete_selected_labels()
+
+        self.assertEqual(deleted_label, "B")
+        self.assertEqual(self.page.review_table.rowCount(), 1)
+        self.assertEqual(
+            self.page.review_table.currentItem().row(),
+            0,
+        )
+        self.assertEqual(
+            self.page.review_table.item(0, LABEL_COLUMN).text(),
+            "2",
+        )
+        self.assertTrue(self.page.review_table.item(0, LABEL_COLUMN).isSelected())
+
+    def test_delete_last_label_falls_back_to_the_new_last_row(self):
+        last_row = self.page.review_table.rowCount() - 1
+        self.page.review_table.selectRow(last_row)
+
+        self.page.delete_selected_labels()
+
+        self.assertEqual(self.page.review_table.rowCount(), 1)
+        self.assertEqual(self.page.review_table.currentRow(), 0)
+        self.assertTrue(self.page.review_table.item(0, LABEL_COLUMN).isSelected())
+
     def test_default_confidence_threshold_is_point_six(self):
         self.assertAlmostEqual(self.page.confidence_threshold.value(), 0.60)
         self.assertFalse(hasattr(self.page, "save_button"))
 
-    def test_document_review_button_returns_directly_to_review_page(self):
+    def test_duplicate_document_navigation_button_was_removed(self):
         opened_features = []
         self.page.set_open_feature_callback(opened_features.append)
 
-        self.page.document_review_button.click()
+        self.page.open_patent_review()
 
         self.assertEqual(opened_features, ["patent_review"])
-        self.assertEqual(self.page.document_review_button.text(), "← 回文件偵錯")
+        self.assertFalse(hasattr(self.page, "document_review_button"))
 
     def test_result_sorting_is_enabled_by_default(self):
         self.assertTrue(self.page.result_sort_button.isChecked())
@@ -115,17 +152,27 @@ class RecognitionReviewPageTests(unittest.TestCase):
 
         self.page.load_document_symbol_transfer(transfer)
         self.assertEqual(self.page.reference_text.toPlainText(), "1:底座\n2:上蓋")
-        self.assertIn("完整符號說明", self.page.reference_source_button.text())
+        self.assertEqual(
+            self.page.reference_source_button.text(),
+            "完整/代表圖 符號切換",
+        )
+        self.assertIn("目前使用：完整符號說明", self.page.reference_source_button.toolTip())
 
         self.page.reference_text.append("3:人工補入")
         self.page.reference_source_button.setChecked(True)
         self.assertEqual(self.page.reference_text.toPlainText(), "1:底座")
-        self.assertIn("代表圖符號說明", self.page.reference_source_button.text())
+        self.assertIn("目前使用：代表圖符號說明", self.page.reference_source_button.toolTip())
 
         self.page.reference_text.append("9:代表圖人工補入")
         self.page.reference_source_button.setChecked(False)
         self.assertIn("3:人工補入", self.page.reference_text.toPlainText())
         self.assertNotIn("9:代表圖人工補入", self.page.reference_text.toPlainText())
+
+    def test_first_recognition_step_uses_emphasized_red_button_style(self):
+        self.assertEqual(
+            self.page.run_button.objectName(),
+            "RecognitionStartButton",
+        )
 
     def test_all_detection_boxes_are_enabled_by_default(self):
         self.assertTrue(self.page.show_all_boxes_button.isChecked())
@@ -254,6 +301,76 @@ class RecognitionReviewPageTests(unittest.TestCase):
 
         self.assertEqual(self.page.show_all_boxes_button.text(), "隱藏一般辨識框")
         self.assertEqual(highlighted.toImage().pixelColor(40, 10).name(), "#2563eb")
+
+    def test_preview_zoom_rerenders_from_full_resolution_pixmap(self):
+        source = QPixmap(1200, 900)
+        source.fill(QColor("#ffffff"))
+        self.page.current_pixmap = source
+        self.page.current_preview_index = 0
+        self.page.resize(1100, 760)
+        self.page.show()
+        self.app.processEvents()
+        self.page.update_scaled_preview()
+
+        initial_width = self.page.image_preview.pixmap().width()
+        viewport_center = self.page.scroll_area.viewport().rect().center()
+        self.page.zoom_preview_at(1, viewport_center)
+
+        zoomed_pixmap = self.page.image_preview.pixmap()
+        self.assertGreater(self.page.preview_zoom_factor, 1.0)
+        self.assertGreater(zoomed_pixmap.width(), initial_width)
+        self.assertEqual(self.page.image_preview.size(), zoomed_pixmap.size())
+        self.assertIn("%", self.page.preview_zoom_status.text())
+
+    def test_scaled_preview_keeps_detection_box_coordinates_aligned(self):
+        pixmap = QPixmap(200, 200)
+        pixmap.fill(QColor("#ffffff"))
+
+        scaled_boxes = self.page.draw_low_confidence_boxes(
+            pixmap,
+            0,
+            coordinate_scale_x=2.0,
+            coordinate_scale_y=2.0,
+        )
+
+        self.assertEqual(
+            scaled_boxes.toImage().pixelColor(QPoint(20, 20)).name(),
+            "#dc2626",
+        )
+
+    def test_reviewed_ocr_labels_are_published_after_manual_edit(self):
+        context = PatentWorkflowContext()
+        self.page.set_workflow_context(context)
+        self.page._publish_reviewed_ocr_results()
+        self.assertEqual(context.ocr_results[0]["numbers"], ["B", "2"])
+
+        label_item = self.page.review_table.item(0, LABEL_COLUMN)
+        label_item.setText("8")
+        self.app.processEvents()
+
+        self.assertEqual(context.ocr_results[0]["numbers"], ["8", "2"])
+
+    def test_current_page_figure_mapping_accepts_multi_figure_ranges(self):
+        context = PatentWorkflowContext()
+        self.page.set_workflow_context(context)
+        self.page.image_paths = ["page_001.png"]
+        self.page.source_image_paths = ["page_001.png"]
+        self.page._initialize_figure_number_mappings(self.page.image_paths)
+        self.page.figure_mapping_line.setText("1-2")
+
+        self.assertTrue(self.page.apply_current_figure_mapping())
+
+        self.assertEqual(self.page.figure_number_mappings[0], [1, 2])
+        self.assertEqual(self.page.all_results[0]["figure_numbers"], [1, 2])
+        self.assertNotIn("figure_number", self.page.all_results[0])
+        self.assertEqual(context.ocr_results[0]["figure_numbers"], [1, 2])
+
+    def test_explicit_figure_name_overrides_default_page_number(self):
+        self.page.image_paths = ["專利圖6.png", "page_002.png"]
+
+        self.page._initialize_figure_number_mappings(self.page.image_paths)
+
+        self.assertEqual(self.page.figure_number_mappings, {0: [6], 1: [2]})
 
 
 if __name__ == "__main__":

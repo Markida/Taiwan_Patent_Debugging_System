@@ -1,6 +1,9 @@
 from html import escape
 
-from features.patent_ocr.label_parser import normalize_label_text
+from features.patent_ocr.label_parser import (
+    normalize_label_text,
+    normalize_reference_label_text,
+)
 
 
 def _label_character_sort_key(label):
@@ -17,12 +20,21 @@ def _label_character_sort_key(label):
     )
 
 
-def _unique_normalized_numbers(numbers, sort_numbers=False):
+def _unique_normalized_numbers(
+    numbers,
+    sort_numbers=False,
+    *,
+    preserve_reference_symbols=False,
+):
     normalized_numbers = []
     seen = set()
 
     for number in numbers:
-        normalized = normalize_label_text(number)
+        normalized = (
+            normalize_reference_label_text(number)
+            if preserve_reference_symbols
+            else normalize_label_text(number)
+        )
         if not normalized or normalized in seen:
             continue
         normalized_numbers.append(normalized)
@@ -77,6 +89,7 @@ def build_result_summary_html(
     expected_numbers = _unique_normalized_numbers(
         (item.get("number", "") for item in reference_items),
         sort_numbers=sort_numbers,
+        preserve_reference_symbols=True,
     )
     expected_set = set(expected_numbers)
 

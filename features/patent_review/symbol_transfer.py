@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import re
+import unicodedata
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from features.patent_ocr.label_parser import normalize_label_text
+from features.patent_ocr.label_parser import normalize_reference_label_text
 
 from .models import PatentDocument, PatentParagraph, PatentTextReview
 from .section_parser import split_section_heading
@@ -25,11 +26,18 @@ SOURCE_TITLES = {
 }
 MAX_NUMERIC_RANGE_SIZE = 100
 _SYMBOL_LINE = re.compile(
-    r"^\s*(?P<symbols>[0-9A-Za-z'’′＇,，、~～\-至\s]+?)"
-    r"\s*[:：]\s*(?P<name>\S(?:.*\S)?)\s*$"
+    r"^\s*[（(]?(?P<symbols>[^:：.．\r\n]+?)[）)]?"
+    r"\s*[:：.．]\s*(?P<name>\S(?:.*\S)?)\s*$"
 )
-_LABEL_TOKEN = re.compile(r"^[0-9A-Za-z]+(?:['’′＇])?$")
+_SYMBOL_SPACE_LINE = re.compile(
+    r"^\s*[（(]?(?P<symbols>[^\s:：.．,，、~～\-()（）]+)[）)]?"
+    r"\s+(?P<name>\S(?:.*\S)?)\s*$"
+)
 _NUMERIC_RANGE = re.compile(r"^(?P<start>\d+)\s*(?:-|~|～|至)\s*(?P<end>\d+)$")
+_PREFIX_NUMERIC_RANGE = re.compile(
+    r"^(?P<prefix>[A-Za-z]+)(?P<start>\d+)\s*(?:-|~|～|至)\s*"
+    r"(?:(?P<end_prefix>[A-Za-z]+))?(?P<end>\d+)$"
+)
 _PRIMES = "'’′＇"
 _NON_SYMBOL_SEPARATORS = {
     "新型專利說明書",
@@ -37,6 +45,10 @@ _NON_SYMBOL_SEPARATORS = {
     "新型摘要",
     "發明摘要",
 }
+
+
+def _match_symbol_line(text: str):
+    return _SYMBOL_LINE.fullmatch(text) or _SYMBOL_SPACE_LINE.fullmatch(text)
 
 
 @dataclass(frozen=True)
@@ -65,6 +77,20 @@ class SymbolTransferWarning:
     source_path: str = ""
     char_start: Optional[int] = None
     char_end: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class TableSymbolCandidate:
+    """One symbol/name pair reconstructed from adjacent Word table cells."""
+
+    section_key: str
+    expression: str
+    name: str
+    symbol_paragraph: PatentParagraph
+    name_paragraph: PatentParagraph
+    char_start: int
+    char_end: int
+    consumed_paragraph_indices: Tuple[int, ...]
 
 
 @dataclass
@@ -179,13 +205,14 @@ def _symbol_content(paragraph: PatentParagraph) -> Tuple[str, int]:
 
 
 def _normalize_direct_label(raw_token: str) -> Optional[str]:
-    compact = re.sub(r"\s+", "", raw_token)
-    if not _LABEL_TOKEN.fullmatch(compact):
-        return None
+    compact = re.sub(
+        r"\s+",
+        "",
+        unicodedata.normalize("NFKC", raw_token),
+    )
     if compact[-1:] in _PRIMES and compact[-2:-1] and not compact[-2:-1].isdigit():
         return None
-    normalized = normalize_label_text(compact)
-    return normalized or None
+    return normalize_reference_label_text(compact) or None
 
 
 def _expand_expression(expression: str) -> Tuple[List[Tuple[str, str]], Optional[str]]:
@@ -194,7 +221,8 @@ def _expand_expression(expression: str) -> Tuple[List[Tuple[str, str]], Optional
     if not tokens or any(not token for token in tokens):
         return [], "符號群組含有空白項目。"
     for token in tokens:
-        numeric_range = _NUMERIC_RANGE.fullmatch(token)
+        normalized_token = unicodedata.normalize("NFKC", token)
+        numeric_range = _NUMERIC_RANGE.fullmatch(normalized_token)
         if numeric_range:
             start = int(numeric_range.group("start"))
             end = int(numeric_range.group("end"))
@@ -204,6 +232,30 @@ def _expand_expression(expression: str) -> Tuple[List[Tuple[str, str]], Optional
                 return [], f"數字區間「{token}」超過 {MAX_NUMERIC_RANGE_SIZE} 個標號。"
             expanded.extend((str(number), token) for number in range(start, end + 1))
             continue
+        prefix_range = _PREFIX_NUMERIC_RANGE.fullmatch(normalized_token)
+        if prefix_range:
+            prefix = prefix_range.group("prefix")
+            end_prefix = prefix_range.group("end_prefix") or prefix
+            start_digits = prefix_range.group("start")
+            end_digits = prefix_range.group("end")
+            start = int(start_digits)
+            end = int(end_digits)
+            if end_prefix != prefix:
+                return [], f"英數區間「{token}」的前綴不一致，程式不會自行猜測。"
+            if end < start:
+                return [], f"英數區間「{token}」為反向範圍，程式不會自行猜測。"
+            if end - start + 1 > MAX_NUMERIC_RANGE_SIZE:
+                return [], f"英數區間「{token}」超過 {MAX_NUMERIC_RANGE_SIZE} 個標號。"
+            preserve_width = start_digits.startswith("0") or end_digits.startswith("0")
+            width = max(len(start_digits), len(end_digits)) if preserve_width else 0
+            expanded.extend(
+                (
+                    f"{prefix}{str(number).zfill(width) if width else number}",
+                    token,
+                )
+                for number in range(start, end + 1)
+            )
+            continue
         if any(separator in token for separator in ("-", "~", "～", "至")):
             return [], f"英數混合區間「{token}」具有歧義，請改成逐項列出。"
         label = _normalize_direct_label(token)
@@ -211,6 +263,118 @@ def _expand_expression(expression: str) -> Tuple[List[Tuple[str, str]], Optional
             return [], f"「{token}」不是 OCR 支援的標號格式。"
         expanded.append((label, token))
     return expanded, None
+
+
+_TABLE_SYMBOL_HEADERS = {"符號", "標號", "圖號", "元件標號"}
+_TABLE_NAME_HEADERS = {"名稱", "元件名稱", "符號名稱", "說明"}
+
+
+def _table_symbol_candidates(
+    document: PatentDocument,
+    section_keys: Iterable[str] = tuple(SECTION_FOR_SOURCE.values()),
+) -> Tuple[List[TableSymbolCandidate], set[int]]:
+    """Reconstruct symbol pairs from adjacent cells without flattening rows."""
+
+    wanted_sections = set(section_keys)
+    cells: Dict[
+        Tuple[int, int, int],
+        List[PatentParagraph],
+    ] = {}
+    for paragraph in document.paragraphs:
+        if (
+            paragraph.source_kind != "table"
+            or paragraph.table_index is None
+            or paragraph.row_index is None
+            or paragraph.cell_index is None
+            or paragraph.section_key not in wanted_sections
+        ):
+            continue
+        cells.setdefault(
+            (
+                paragraph.table_index,
+                paragraph.row_index,
+                paragraph.cell_index,
+            ),
+            [],
+        ).append(paragraph)
+
+    rows: Dict[Tuple[int, int], List[Tuple[int, List[PatentParagraph]]]] = {}
+    for (table_index, row_index, cell_index), paragraphs in cells.items():
+        rows.setdefault((table_index, row_index), []).append(
+            (cell_index, paragraphs)
+        )
+
+    candidates: List[TableSymbolCandidate] = []
+    consumed: set[int] = set()
+    for _row_key, row_cells in sorted(rows.items()):
+        ordered = sorted(row_cells, key=lambda item: item[0])
+        prepared: List[Tuple[str, List[PatentParagraph]]] = []
+        for _cell_index, paragraphs in ordered:
+            nonempty = [item for item in paragraphs if item.text.strip()]
+            if not nonempty:
+                continue
+            prepared.append(
+                (
+                    " ".join(item.text.strip() for item in nonempty),
+                    nonempty,
+                )
+            )
+        if len(prepared) < 2:
+            continue
+
+        first_key = re.sub(r"\s+", "", prepared[0][0]).strip("：:.．")
+        second_key = re.sub(r"\s+", "", prepared[1][0]).strip("：:.．")
+        if first_key in _TABLE_SYMBOL_HEADERS and second_key in _TABLE_NAME_HEADERS:
+            consumed.update(
+                paragraph.index
+                for _text, paragraphs in prepared[:2]
+                for paragraph in paragraphs
+            )
+            continue
+
+        index = 0
+        while index + 1 < len(prepared):
+            expression_text, symbol_paragraphs = prepared[index]
+            name, name_paragraphs = prepared[index + 1]
+            expression = expression_text.strip(" \t（()）：:.．")
+            if _match_symbol_line(expression_text) is not None:
+                index += 1
+                continue
+            expanded, error = _expand_expression(expression)
+            if error or not expanded or not name.strip():
+                index += 1
+                continue
+            # A leading row-number column followed by a symbol column should
+            # pair the latter with the name cell, not pair two labels together.
+            next_expression = name.strip(" \t（()）：:.．")
+            next_expanded, next_error = _expand_expression(next_expression)
+            if next_error is None and next_expanded:
+                consumed.update(
+                    paragraph.index for paragraph in symbol_paragraphs
+                )
+                index += 1
+                continue
+            symbol_paragraph = symbol_paragraphs[0]
+            name_paragraph = name_paragraphs[0]
+            pair_indices = tuple(
+                paragraph.index
+                for paragraph in symbol_paragraphs + name_paragraphs
+            )
+            consumed.update(pair_indices)
+            candidates.append(
+                TableSymbolCandidate(
+                    section_key=symbol_paragraph.section_key or "",
+                    expression=expression,
+                    name=name.strip(),
+                    symbol_paragraph=symbol_paragraph,
+                    name_paragraph=name_paragraph,
+                    char_start=0,
+                    char_end=len(symbol_paragraph.text),
+                    consumed_paragraph_indices=pair_indices,
+                )
+            )
+            index += 2
+    return candidates, consumed
 
 
 def extract_document_symbols(
@@ -230,17 +394,29 @@ def extract_document_symbols(
     source_for_section = {
         section_key: source for source, section_key in SECTION_FOR_SOURCE.items()
     }
+    table_candidates, consumed_table_paragraphs = _table_symbol_candidates(
+        document
+    )
 
     for paragraph in document.paragraphs:
         symbol_source = source_for_section.get(paragraph.section_key or "")
         if symbol_source is None:
+            continue
+        if paragraph.index in consumed_table_paragraphs:
+            continue
+        if (
+            paragraph.section_key == "drawing_symbol_description"
+            and paragraph.numbering_value is not None
+        ):
+            # The formal company template uses one numbered introductory
+            # paragraph before the unnumbered symbol entries.
             continue
         section_key = SECTION_FOR_SOURCE[symbol_source]
         content, base_offset = _symbol_content(paragraph)
         for line, line_start, line_end in _line_spans(content, base_offset):
             if line.strip() in _NON_SYMBOL_SEPARATORS:
                 continue
-            match = _SYMBOL_LINE.fullmatch(line)
+            match = _match_symbol_line(line)
             if match is None:
                 warnings.append(SymbolTransferWarning(
                     code="SYMBOL_LINE_UNPARSED",
@@ -308,6 +484,68 @@ def extract_document_symbols(
                         char_end=symbol_end,
                     ))
 
+    for candidate in table_candidates:
+        symbol_source = source_for_section.get(candidate.section_key)
+        if symbol_source is None:
+            continue
+        section_key = SECTION_FOR_SOURCE[symbol_source]
+        expanded, error = _expand_expression(candidate.expression)
+        paragraph = candidate.symbol_paragraph
+        if error:
+            warnings.append(SymbolTransferWarning(
+                code="SYMBOL_EXPRESSION_AMBIGUOUS",
+                severity="warning",
+                message=error,
+                blocking=True,
+                symbol_source=symbol_source,
+                section_key=section_key,
+                paragraph_index=paragraph.index,
+                source_path=paragraph.source_path,
+                char_start=candidate.char_start,
+                char_end=candidate.char_end,
+            ))
+            continue
+        for label, raw_symbol in expanded:
+            entry = PatentSymbolEntry(
+                label=label,
+                name=candidate.name,
+                raw_symbol=raw_symbol,
+                symbol_source=symbol_source,
+                paragraph_index=paragraph.index,
+                source_path=paragraph.source_path,
+                char_start=candidate.char_start,
+                char_end=candidate.char_end,
+            )
+            previous = seen_by_source[symbol_source].get(label)
+            if previous is None:
+                seen_by_source[symbol_source][label] = entry
+                entries_by_source[symbol_source].append(entry)
+            elif previous.name != candidate.name:
+                warnings.append(SymbolTransferWarning(
+                    code="SYMBOL_NAME_CONFLICT",
+                    severity="error",
+                    message=(
+                        f"{SOURCE_TITLES[symbol_source]}的標號「{label}」同時對應"
+                        f"「{previous.name}」與「{candidate.name}」，自動交接前必須人工確認。"
+                    ),
+                    blocking=True,
+                    symbol_source=symbol_source,
+                    section_key=section_key,
+                    paragraph_index=paragraph.index,
+                    source_path=paragraph.source_path,
+                    char_start=candidate.char_start,
+                    char_end=candidate.char_end,
+                ))
+
+    for entries in entries_by_source.values():
+        entries.sort(
+            key=lambda entry: (
+                entry.paragraph_index,
+                entry.char_start,
+                entry.char_end,
+            )
+        )
+
     for symbol_source, section_key in SECTION_FOR_SOURCE.items():
         if section_key not in found_sections:
             warnings.append(SymbolTransferWarning(
@@ -362,7 +600,7 @@ def _manual_entries(
     seen: Dict[str, PatentSymbolEntry] = {}
 
     for line, line_start, line_end in _line_spans(text, 0):
-        match = _SYMBOL_LINE.fullmatch(line)
+        match = _match_symbol_line(line)
         if match is None:
             warnings.append(SymbolTransferWarning(
                 code="MANUAL_SYMBOL_LINE_UNPARSED",

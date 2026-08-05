@@ -5,7 +5,9 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from features.patent_review import PatentDocxError, parse_docx
+from features.patent_review.docx_reader import _render_numbering_text
 from features.patent_review.section_parser import split_section_heading
+from features.patent_review.symbol_transfer import extract_document_symbols
 from tools.inspect_patent_docx import SYSTEM_FULL_NAME, SYSTEM_NAME, build_reports
 
 
@@ -31,6 +33,10 @@ DOCUMENT_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:p><w:r><w:t>【符號說明】</w:t></w:r></w:p>
   <w:tbl>
    <w:tr><w:tc><w:p><w:r><w:t>10：殼體</w:t></w:r></w:p></w:tc></w:tr>
+   <w:tr>
+    <w:tc><w:p><w:r><w:t>20</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>底座</w:t></w:r></w:p></w:tc>
+   </w:tr>
   </w:tbl>
   <w:p><w:r><w:t>【圖式】</w:t></w:r></w:p>
   <w:p>
@@ -104,6 +110,12 @@ def build_numbered_docx(path: Path) -> None:
 
 
 class PatentDocxParserTests(unittest.TestCase):
+    def test_company_decimal_zero_template_renders_exactly_four_digits(self):
+        self.assertEqual(
+            _render_numbering_text(1, "decimalZero", "【00%1】"),
+            "【0001】",
+        )
+
     def test_accepts_tipo_heading_bracket_variants(self):
         black_bracket = split_section_heading("【中文摘要】合成摘要內容")
         tortoise_bracket = split_section_heading("〖實施方式〗")
@@ -157,6 +169,30 @@ class PatentDocxParserTests(unittest.TestCase):
             self.assertEqual(table_paragraph.source_kind, "table")
             self.assertEqual(table_paragraph.table_index, 0)
             self.assertEqual(table_paragraph.section_key, "drawing_symbol_description")
+            split_symbol = next(
+                paragraph for paragraph in document.paragraphs
+                if paragraph.text == "20"
+            )
+            split_name = next(
+                paragraph for paragraph in document.paragraphs
+                if paragraph.text == "底座"
+            )
+            self.assertEqual(
+                (split_symbol.table_index, split_symbol.row_index, split_symbol.cell_index),
+                (0, 1, 0),
+            )
+            self.assertEqual(
+                (split_name.table_index, split_name.row_index, split_name.cell_index),
+                (0, 1, 1),
+            )
+            transfer = extract_document_symbols(document)
+            self.assertEqual(
+                transfer.reference_items,
+                [
+                    {"number": "10", "name": "殼體"},
+                    {"number": "20", "name": "底座"},
+                ],
+            )
 
             self.assertEqual(len(document.images), 1)
             image = document.images[0]

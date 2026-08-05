@@ -13,17 +13,22 @@ from features.patent_review.symbol_transfer import (
 from features.patent_review.text_normalizer import normalize_patent_text
 
 
-def build_document(lines):
-    paragraphs = [
-        PatentParagraph(
+def build_document(lines, *, table_cells=None):
+    table_cells = table_cells or {}
+    paragraphs = []
+    for index, text in enumerate(lines):
+        table_location = table_cells.get(index)
+        paragraphs.append(PatentParagraph(
             index=index,
             text=text,
             normalized_text=normalize_patent_text(text),
             source_path=f"body/p[{index}]",
+            source_kind="table" if table_location is not None else "body",
+            table_index=table_location[0] if table_location is not None else None,
+            row_index=table_location[1] if table_location is not None else None,
+            cell_index=table_location[2] if table_location is not None else None,
             run_spans=[TextRunSpan(0, 0, len(text), text)] if text else [],
-        )
-        for index, text in enumerate(lines)
-    ]
+        ))
     sections, patent_type, patent_title = assign_sections(paragraphs)
     return PatentDocument(
         source_path="C:/synthetic/transfer.docx",
@@ -83,6 +88,76 @@ class PatentSymbolTransferTests(unittest.TestCase):
         self.assertFalse(
             any(warning.symbol_source == "full" for warning in transfer.warnings)
         )
+
+    def test_extracts_symbol_and_name_from_adjacent_table_cells(self):
+        lines = [
+            "【中文新型名稱】測試裝置",
+            "【符號說明】",
+            "符號",
+            "名稱",
+            "S1~S2",
+            "感測器",
+            "10",
+            "底座",
+            "1",
+            "20:",
+            "上蓋",
+            "【代表圖之符號簡單說明】",
+            "10:底座",
+        ]
+        table_cells = {
+            2: (0, 0, 0),
+            3: (0, 0, 1),
+            4: (0, 1, 0),
+            5: (0, 1, 1),
+            6: (0, 2, 0),
+            7: (0, 2, 1),
+            8: (0, 3, 0),
+            9: (0, 3, 1),
+            10: (0, 3, 2),
+        }
+        document = build_document(lines, table_cells=table_cells)
+        review = review_document(document)
+        transfer = extract_document_symbols(document, review)
+
+        self.assertEqual(
+            transfer.reference_items,
+            [
+                {"number": "S1", "name": "感測器"},
+                {"number": "S2", "name": "感測器"},
+                {"number": "10", "name": "底座"},
+                {"number": "20", "name": "上蓋"},
+            ],
+        )
+        self.assertTrue(transfer.ready_for_ocr)
+        self.assertFalse(
+            any(
+                warning.blocking and warning.symbol_source == "full"
+                for warning in transfer.warnings
+            )
+        )
+
+    def test_alphanumeric_ranges_and_literal_symbols_are_preserved(self):
+        document = build_document([
+            "【中文新型名稱】測試裝置",
+            "【符號說明】",
+            "S1~S8:感測器",
+            "P01-P03:端子",
+            "X:字母元件",
+            "△:特殊元件",
+        ])
+
+        transfer = extract_document_symbols(document)
+
+        self.assertTrue(transfer.ready_for_ocr)
+        self.assertEqual(
+            [entry.label for entry in transfer.full_entries],
+            [
+                "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8",
+                "P01", "P02", "P03", "X", "△",
+            ],
+        )
+        self.assertIn("△:特殊元件", transfer.reference_text)
 
     def test_ambiguous_or_conflicting_symbols_block_complete_handoff(self):
         document = build_document([
@@ -160,6 +235,20 @@ class PatentSymbolTransferTests(unittest.TestCase):
         self.assertEqual(received, [transfer])
         context.clear_document()
         self.assertIsNone(context.symbol_transfer)
+
+    def test_workflow_context_delivers_and_clears_reviewed_ocr_results(self):
+        context = PatentWorkflowContext()
+        received = []
+        results = [{"image_name": "Pic_01", "numbers": ["1", "20"]}]
+
+        context.publish_ocr_results(results)
+        context.subscribe_ocr_results(received.append)
+
+        self.assertEqual(received, [results])
+        self.assertIsNot(received[0], context.ocr_results)
+        context.clear_ocr_results()
+        self.assertEqual(context.ocr_results, [])
+        self.assertEqual(received[-1], [])
 
     def test_confirmed_editor_text_rebuilds_both_lists(self):
         original = extract_document_symbols(build_document(BASE_LINES))

@@ -1,6 +1,14 @@
 """Read-only patent parsing and Stage 2 deterministic text review."""
 
 from .docx_reader import PatentDocxError, parse_docx
+from .custom_rules import (
+    CUSTOM_TEXT_RULES_FILENAME,
+    CustomRuleError,
+    CustomRuleStorageError,
+    CustomRuleValidationError,
+    CustomTextRule,
+    CustomTextRuleStore,
+)
 from .models import PatentDocument, PatentIssue, PatentTextReview, RuleDefinition
 from .rule_engine import RULE_CATALOG, review_document
 from .cross_checker import (
@@ -26,6 +34,12 @@ __all__ = [
     "PatentTextReview",
     "RULE_CATALOG",
     "RuleDefinition",
+    "CUSTOM_TEXT_RULES_FILENAME",
+    "CustomRuleError",
+    "CustomRuleStorageError",
+    "CustomRuleValidationError",
+    "CustomTextRule",
+    "CustomTextRuleStore",
     "parse_docx",
     "review_document",
     "DocumentSymbolTransfer",

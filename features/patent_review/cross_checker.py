@@ -6,7 +6,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from features.patent_ocr.label_parser import normalize_label_text
+from features.patent_ocr.label_parser import (
+    normalize_label_text,
+    normalize_reference_label_text,
+)
 from features.patent_ocr.review_tools import detection_confidence
 
 from .symbol_transfer import DocumentSymbolTransfer, FULL_SYMBOL_SOURCE
@@ -59,11 +62,15 @@ class PatentDrawingCrossCheck:
         return payload
 
 
-def _unique(values: Iterable[str]) -> List[str]:
+def _unique(values: Iterable[str], *, preserve_reference_symbols: bool = False) -> List[str]:
     output: List[str] = []
     seen = set()
     for value in values:
-        normalized = normalize_label_text(value)
+        normalized = (
+            normalize_reference_label_text(value)
+            if preserve_reference_symbols
+            else normalize_label_text(value)
+        )
         if normalized and normalized not in seen:
             seen.add(normalized)
             output.append(normalized)
@@ -109,7 +116,8 @@ def compare_document_symbols_with_ocr(
     """Compare labels without treating normal per-image absence as an error."""
 
     document_labels = _unique(
-        entry.label for entry in transfer.entries_for(symbol_source)
+        (entry.label for entry in transfer.entries_for(symbol_source)),
+        preserve_reference_symbols=True,
     )
     document_set = set(document_labels)
     image_checks: List[ImageCrossCheck] = []

@@ -9,6 +9,7 @@ Saint-Island_Patent_MDS/
   Saint-Island_Patent_MDS.exe
   Offline_Check.bat
   Saint-IslandPatentOCR_啟動.bat
+  custom_text_rules.json        optional user-created rules, preserved by updates
   app/
     main.py
     app/

@@ -35,10 +35,30 @@ echo Target: "%TARGET%"
 for %%F in (
     "main.py"
     "app\config.py"
+    "app\main_window.py"
+    "app\paths.py"
+    "app\workflow_context.py"
+    "app\features\snake\__init__.py"
+    "app\features\snake\score_store.py"
+    "app\resources\app_icon.ico"
+    "app\resources\app_icon.png"
+    "app\styles.py"
     "features\registry.py"
+    "features\patent_review\custom_rules.py"
+    "features\patent_review\docx_reader.py"
+    "features\patent_review\figure_ocr_checker.py"
+    "features\patent_review\models.py"
     "features\patent_review\rule_engine.py"
+    "features\patent_review\section_parser.py"
+    "features\patent_review\symbol_transfer.py"
+    "ui\custom_text_rule_dialog.py"
+    "ui\demo_tool_page.py"
+    "ui\embodiment_figure_compare_page.py"
+    "ui\feature_navigation.py"
     "ui\file_drop.py"
     "ui\patent_review_page.py"
+    "ui\recognition_page.py"
+    "ui\snake_game_page.py"
 ) do (
     if not exist "%SOURCE%\%%~F" (
         echo [ERROR] Update package is incomplete: app\%%~F
@@ -47,7 +67,7 @@ for %%F in (
     )
 )
 if not exist "%PACKAGE%Saint-Island_Patent_MDS.exe" (
-    echo [ERROR] Update package is missing the v1.09.0 launcher.
+    echo [ERROR] Update package is missing the v2.0.4 launcher.
     pause
     exit /b 2
 )
@@ -81,7 +101,7 @@ if errorlevel 1 (
 copy /Y "%PACKAGE%Offline_Check.bat" "%TARGET%\Offline_Check.bat" >nul
 copy /Y "%PACKAGE%Startup_Diagnostic.bat" "%TARGET%\Startup_Diagnostic.bat" >nul
 
-set "REPORT=%TEMP%\SaintIsland_v109_update_check.json"
+set "REPORT=%TEMP%\SaintIsland_v204_update_check.json"
 if exist "%REPORT%" del /q "%REPORT%"
 "%TARGET%\Saint-Island_Patent_MDS.exe" --offline-self-test "%REPORT%"
 set "SELFTEST=%ERRORLEVEL%"
@@ -112,6 +132,6 @@ if not "%GUI_TEST%"=="0" (
 )
 
 echo.
-echo [PASS] v1.09.0 update installed, offline inference passed, and GUI started.
+echo [PASS] v2.0.4 update installed, offline inference passed, and GUI started.
 pause
 exit /b 0

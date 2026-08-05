@@ -1,8 +1,11 @@
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QStackedWidget
 
 from app.config import APP_NAME
+from app.paths import get_app_icon_path
 from app.styles import APP_STYLE
 from ui.home_page import HomePage
+from ui.snake_game_page import SnakeGamePage
 from features.registry import FEATURES
 from app.workflow_context import PatentWorkflowContext
 
@@ -12,6 +15,9 @@ class MainWindow(QStackedWidget):
         super().__init__()
 
         self.setWindowTitle(APP_NAME)
+        icon_path = get_app_icon_path()
+        if icon_path.is_file():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1360, 860)
 
         self.feature_pages = {}
@@ -19,10 +25,15 @@ class MainWindow(QStackedWidget):
 
         self.home_page = HomePage(
             features=FEATURES,
-            open_feature_callback=self.open_feature
+            open_feature_callback=self.open_feature,
+            open_secret_callback=self.open_snake_game,
         )
 
         self.addWidget(self.home_page)
+        # The Easter egg is deliberately not part of FEATURES: it must never
+        # appear in home cards or the shared top navigation.
+        self.snake_page = SnakeGamePage(go_home_callback=self.go_home)
+        self.addWidget(self.snake_page)
 
         for feature in FEATURES:
             feature_id = feature["id"]
@@ -38,6 +49,14 @@ class MainWindow(QStackedWidget):
             )
             if callable(set_open_feature_callback):
                 set_open_feature_callback(self.open_feature)
+            set_feature_navigation = getattr(
+                page, "set_feature_navigation", None
+            )
+            if callable(set_feature_navigation):
+                set_feature_navigation(
+                    FEATURES,
+                    self.open_feature,
+                )
 
             self.feature_pages[feature_id] = page
             self.addWidget(page)
@@ -52,4 +71,11 @@ class MainWindow(QStackedWidget):
             self.setCurrentWidget(page)
 
     def go_home(self):
+        if self.currentWidget() is self.snake_page:
+            self.snake_page.board.timer.stop()
+            self.snake_page.board.running = False
         self.setCurrentWidget(self.home_page)
+
+    def open_snake_game(self):
+        self.snake_page.prepare_game()
+        self.setCurrentWidget(self.snake_page)

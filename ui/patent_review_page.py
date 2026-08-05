@@ -1,5 +1,6 @@
 from html import escape
 from pathlib import Path
+import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from features.patent_review import (
+    CustomRuleError,
+    CustomTextRuleStore,
     FULL_SYMBOL_SOURCE,
     REPRESENTATIVE_SYMBOL_SOURCE,
     PatentDocxError,
@@ -31,13 +34,15 @@ from features.patent_review import (
     rebuild_transfer_from_reference_texts,
     review_document,
 )
+from ui.custom_text_rule_dialog import CustomTextRuleDialog
+from ui.feature_navigation import FeatureNavigationBar
 from ui.file_drop import SingleFileDropController
 
 
 class PatentReviewPage(QWidget):
     """Read-only DOCX review page and controlled symbol-list handoff."""
 
-    def __init__(self, go_home_callback):
+    def __init__(self, go_home_callback, custom_rule_store=None):
         super().__init__()
         self.go_home_callback = go_home_callback
         self.open_feature_callback = None
@@ -46,6 +51,10 @@ class PatentReviewPage(QWidget):
         self.review = None
         self.symbol_transfer = None
         self.issue_by_id = {}
+        self.custom_rule_store = custom_rule_store or CustomTextRuleStore()
+        self.custom_rules = []
+        self.custom_rule_load_error = ""
+        self._reload_custom_rules()
         self.build_ui()
         self.file_drop_controller = SingleFileDropController(
             self,
@@ -60,21 +69,25 @@ class PatentReviewPage(QWidget):
     def set_open_feature_callback(self, callback):
         self.open_feature_callback = callback
 
+    def set_feature_navigation(self, features, open_feature_callback):
+        self.feature_navigation.configure(features, open_feature_callback)
+
     def build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 8)
         layout.setSpacing(3)
 
+        self.feature_navigation = FeatureNavigationBar(
+            self.go_home_callback,
+            "patent_review",
+        )
+        layout.addWidget(self.feature_navigation)
+
         self.file_header_layout = QHBoxLayout()
         self.file_header_layout.setSpacing(6)
-        back_button = QPushButton("← 回首頁")
-        back_button.setObjectName("SecondaryButton")
-        back_button.setMaximumHeight(34)
-        back_button.clicked.connect(self.go_home_callback)
         title = QLabel("專利文件偵錯")
         title.setObjectName("PageTitle")
         title.setMaximumHeight(34)
-        self.file_header_layout.addWidget(back_button)
         self.file_header_layout.addWidget(title)
         self.file_header_layout.addSpacing(8)
 
@@ -125,23 +138,35 @@ class PatentReviewPage(QWidget):
         self.issue_summary = QLabel("尚未載入文件")
         issue_header.addWidget(issue_title)
         issue_header.addStretch()
+        self.custom_rules_button = QPushButton(
+            f"自訂文字規則（{len(self.custom_rules)}）"
+        )
+        self.custom_rules_button.setObjectName("SecondaryButton")
+        self.custom_rules_button.setToolTip(
+            f"新增或刪除特定文字偵測規則\n儲存位置：{self.custom_rule_store.path}"
+        )
+        self.custom_rules_button.clicked.connect(self.open_custom_rule_manager)
+        issue_header.addWidget(self.custom_rules_button)
         issue_header.addWidget(self.issue_summary)
         issue_layout.addLayout(issue_header)
 
-        self.issue_table = QTableWidget(0, 6)
+        self.issue_table = QTableWidget(0, 4)
         self.issue_table.setObjectName("ReviewTable")
+        review_font = self.issue_table.font()
+        review_font.setPointSizeF(12.0)
+        self.issue_table.setFont(review_font)
+        self.issue_table.horizontalHeader().setFont(review_font)
         self.issue_table.setHorizontalHeaderLabels(
-            ["等級", "規則", "章節", "位置", "問題", "建議"]
+            ["等級", "章節", "位置", "錯誤種類"]
         )
         self.issue_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.issue_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.issue_table.verticalHeader().setVisible(False)
-        for column in (0, 1, 2, 3):
+        for column in (0, 1, 2):
             self.issue_table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeToContents
             )
-        self.issue_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        self.issue_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.issue_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.issue_table.itemSelectionChanged.connect(
             self.on_issue_selection_changed
         )
@@ -163,24 +188,19 @@ class PatentReviewPage(QWidget):
         self.selected_issue_title.setObjectName("PanelTitle")
         location_layout.addWidget(self.selected_issue_title)
 
-        self.error_type_label = QLabel(
-            "錯誤種類：請先點選上方問題"
-        )
-        self.error_type_label.setWordWrap(True)
-        location_layout.addWidget(self.error_type_label)
-        self.error_location_label = QLabel("原文位置：尚未選取")
-        self.error_location_label.setWordWrap(True)
-        location_layout.addWidget(self.error_location_label)
-        location_layout.addWidget(QLabel("原始 Word 段落（紅色為問題位置）："))
         self.original_paragraph_view = QTextEdit()
         self.original_paragraph_view.setReadOnly(True)
-        self.original_paragraph_view.setMinimumHeight(110)
+        self.original_paragraph_view.setMinimumHeight(190)
+        context_font = self.original_paragraph_view.font()
+        context_font.setPointSizeF(14.0)
+        self.original_paragraph_view.setFont(context_font)
+        self.original_paragraph_view.document().setDefaultFont(context_font)
         location_layout.addWidget(self.original_paragraph_view, 1)
 
         self.issue_workspace_splitter.addWidget(location_panel)
-        self.issue_workspace_splitter.setSizes([430, 230])
-        self.issue_workspace_splitter.setStretchFactor(0, 3)
-        self.issue_workspace_splitter.setStretchFactor(1, 2)
+        self.issue_workspace_splitter.setSizes([350, 310])
+        self.issue_workspace_splitter.setStretchFactor(0, 1)
+        self.issue_workspace_splitter.setStretchFactor(1, 1)
         issue_layout.addWidget(self.issue_workspace_splitter)
 
         symbol_panel = QFrame()
@@ -253,11 +273,48 @@ class PatentReviewPage(QWidget):
         if self.file_line.text():
             self.load_document(self.file_line.text())
 
+    def _reload_custom_rules(self):
+        try:
+            self.custom_rules = self.custom_rule_store.load()
+            self.custom_rule_load_error = ""
+            return True
+        except CustomRuleError as error:
+            self.custom_rules = []
+            self.custom_rule_load_error = str(error)
+            return False
+
+    def _update_custom_rule_button(self):
+        self.custom_rules_button.setText(
+            f"自訂文字規則（{len(self.custom_rules)}）"
+        )
+
+    def open_custom_rule_manager(self):
+        dialog = CustomTextRuleDialog(self.custom_rule_store, self)
+        dialog.exec()
+        self._reload_custom_rules()
+        self._update_custom_rule_button()
+        if dialog.rules_changed and self.document is not None:
+            review = review_document(
+                self.document,
+                custom_rules=self.custom_rules,
+            )
+            transfer = extract_document_symbols(self.document, review)
+            self.show_review(self.document, review, transfer)
+        elif dialog.rules_changed:
+            self.status_label.setText(
+                f"已儲存 {len(self.custom_rules)} 條自訂文字規則；載入文件後會自動套用。"
+            )
+
     def load_document(self, source_path):
         path = Path(source_path)
         try:
             document = parse_docx(path)
-            review = review_document(document)
+            self._reload_custom_rules()
+            self._update_custom_rule_button()
+            review = review_document(
+                document,
+                custom_rules=self.custom_rules,
+            )
             transfer = extract_document_symbols(document, review)
         except (PatentDocxError, OSError, ValueError) as error:
             QMessageBox.critical(self, "DOCX 檢核失敗", str(error))
@@ -268,7 +325,7 @@ class PatentReviewPage(QWidget):
         self.reload_button.setEnabled(True)
         return True
 
-    def show_review(self, document, review, transfer):
+    def show_review(self, document, review, transfer, *, publish_symbols=True):
         """Display one completed core review; separated for offscreen testing."""
 
         self.document = document
@@ -293,10 +350,16 @@ class PatentReviewPage(QWidget):
         representative_count = len(transfer.representative_entries)
         self.status_label.setText(
             f"已擷取完整符號 {full_count} 個、代表圖符號 {representative_count} 個。"
+            f"已套用 {len(self.custom_rules)} 條自訂文字規則。"
             "請檢查問題與清單，必要時直接修改。"
         )
+        if self.custom_rule_load_error:
+            self.status_label.setText(
+                self.status_label.text()
+                + " 自訂規則檔讀取失敗，本次僅執行內建規則。"
+            )
 
-        if self.workflow_context is not None and (
+        if publish_symbols and self.workflow_context is not None and (
             transfer.is_source_ready(FULL_SYMBOL_SOURCE)
             or transfer.is_source_ready(REPRESENTATIVE_SYMBOL_SOURCE)
         ):
@@ -305,6 +368,8 @@ class PatentReviewPage(QWidget):
                 self.status_label.text()
                 + " 有效清單已自動暫存至圖片 OCR 功能。"
             )
+        if self.workflow_context is not None:
+            self.workflow_context.publish_document(document)
 
     def _populate_issue_table(self, review):
         self.issue_table.setRowCount(0)
@@ -317,18 +382,12 @@ class PatentReviewPage(QWidget):
         for issue in review.issues:
             row = self.issue_table.rowCount()
             self.issue_table.insertRow(row)
-            location = "文件層級"
-            if issue.paragraph_index is not None:
-                location = f"段落 {issue.paragraph_index}"
-                if issue.char_start is not None and issue.char_end is not None:
-                    location += f" · {issue.char_start}:{issue.char_end}"
+            location = self._logical_issue_location(issue)
             values = [
                 severity_text.get(issue.severity, issue.severity),
-                issue.rule_id,
                 issue.section_title or issue.section_key or "整份文件",
                 location,
                 issue.message,
-                issue.suggestion,
             ]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
@@ -352,6 +411,96 @@ class PatentReviewPage(QWidget):
             return None
         return self.issue_by_id.get(issue_id)
 
+    @staticmethod
+    def _visible_heading_token(text):
+        match = re.match(r"^\s*([【〖][^】〗]+[】〗])", text or "")
+        if match is None:
+            return ""
+        token = match.group(1)
+        if token.startswith("〖"):
+            token = "【" + token[1:-1] + "】"
+        return re.sub(r"\s+", "", token)
+
+    @staticmethod
+    def _visible_numbering_token(paragraph):
+        numbering = (paragraph.numbering_text or "").strip()
+        if numbering:
+            if numbering.startswith("〖") and numbering.endswith("〗"):
+                return "【" + numbering[1:-1] + "】"
+            return numbering
+        match = re.match(
+            r"^\s*([【〖](?:\d{4}|請求項\s*\d+)[】〗])",
+            paragraph.text or "",
+        )
+        if match is None:
+            return ""
+        token = match.group(1)
+        if token.startswith("〖") and token.endswith("〗"):
+            token = "【" + token[1:-1] + "】"
+        return re.sub(r"\s+", "", token)
+
+    def _logical_issue_location(self, issue):
+        """Prefer Word automatic numbering, then the owning section heading."""
+
+        if issue.paragraph_index is None or self.document is None:
+            return issue.section_title or issue.section_key or "整份文件"
+        paragraph_map = {
+            paragraph.index: paragraph for paragraph in self.document.paragraphs
+        }
+        paragraph = paragraph_map.get(issue.paragraph_index)
+        if paragraph is None:
+            return issue.section_title or issue.section_key or "整份文件"
+        if paragraph.source_kind == "table":
+            table_number = (
+                paragraph.table_index + 1
+                if paragraph.table_index is not None
+                else "?"
+            )
+            row_number = (
+                paragraph.row_index + 1
+                if paragraph.row_index is not None
+                else "?"
+            )
+            cell_number = (
+                paragraph.cell_index + 1
+                if paragraph.cell_index is not None
+                else "?"
+            )
+            return (
+                f"表格{table_number}／第{row_number}列／第{cell_number}欄"
+            )
+
+        candidate_sections = [
+            section
+            for section in self.document.sections
+            if section.key == paragraph.section_key
+            and section.major_section_key == (paragraph.major_section_key or "")
+            and section.heading_paragraph_index <= paragraph.index
+        ]
+        section = max(
+            candidate_sections,
+            key=lambda item: item.heading_paragraph_index,
+            default=None,
+        )
+        lower_bound = section.heading_paragraph_index if section is not None else 0
+        for index in range(paragraph.index, lower_bound - 1, -1):
+            candidate = paragraph_map.get(index)
+            if candidate is None:
+                continue
+            numbering = self._visible_numbering_token(candidate)
+            if numbering:
+                return numbering
+
+        if section is not None:
+            heading = paragraph_map.get(section.heading_paragraph_index)
+            token = self._visible_heading_token(heading.text if heading else "")
+            if token:
+                return token
+        token = self._visible_heading_token(paragraph.text)
+        if token:
+            return token
+        return issue.section_title or issue.section_key or "整份文件"
+
     def on_issue_selection_changed(self):
         rows = self.issue_table.selectionModel().selectedRows()
         if not rows:
@@ -361,38 +510,19 @@ class PatentReviewPage(QWidget):
             self._show_issue(issue)
 
     def _show_issue(self, issue):
-        severity_text = {"error": "錯誤", "warning": "警告", "info": "提示"}
-        rule_title = next(
-            (
-                rule.title
-                for rule in self.review.rule_catalog
-                if rule.rule_id == issue.rule_id
-            ),
-            issue.message,
-        )
+        logical_location = self._logical_issue_location(issue)
         self.selected_issue_title.setText(
-            f"錯誤原文定位 · {issue.section_title or issue.section_key or '整份文件'}"
+            f"錯誤原文定位 · {logical_location}"
         )
-        self.error_type_label.setText(
-            f"錯誤種類：{issue.rule_id} · {rule_title}"
-            f"（{severity_text.get(issue.severity, issue.severity)}）"
-        )
-        location_parts = [
-            f"章節：{issue.section_title or issue.section_key or '整份文件'}"
-        ]
-        if issue.paragraph_index is None:
-            location_parts.append("文件層級")
+        claim_context = self._claim_context(issue)
+        logical_paragraph_context = self._logical_paragraph_context_text(issue)
+        if claim_context is not None:
+            original = claim_context["text"]
+        elif logical_paragraph_context is not None:
+            original = logical_paragraph_context
+        elif issue.paragraph_index is None:
             original = ""
         else:
-            location_parts.append(f"段落：{issue.paragraph_index}")
-            if issue.char_start is not None and issue.char_end is not None:
-                location_parts.append(
-                    f"字元：{issue.char_start}:{issue.char_end}"
-                )
-            if issue.run_indices:
-                location_parts.append(
-                    "Word run：" + ", ".join(map(str, issue.run_indices))
-                )
             paragraph = next(
                 (
                     paragraph
@@ -402,12 +532,266 @@ class PatentReviewPage(QWidget):
                 None,
             )
             original = paragraph.text if paragraph is not None else ""
-        self.error_location_label.setText(
-            "原文位置：" + " · ".join(location_parts)
-        )
+        if claim_context is not None:
+            start, end = self._resolved_claim_issue_span(
+                claim_context,
+                issue,
+            )
+        else:
+            start, end = self._resolved_issue_span(original, issue)
         self.original_paragraph_view.setHtml(
-            self._highlighted_paragraph(original, issue.char_start, issue.char_end)
+            self._highlighted_paragraph(original, start, end)
         )
+
+    def _logical_paragraph_context_text(self, issue):
+        """Return all Word paragraphs belonging to one numbered paragraph."""
+
+        if self.document is None:
+            return None
+        indices = issue.details.get("logical_paragraph_indices", [])
+        if not indices:
+            return None
+        wanted = set(indices)
+        paragraphs = [
+            paragraph
+            for paragraph in self.document.paragraphs
+            if paragraph.index in wanted
+        ]
+        if not paragraphs:
+            return None
+        rendered = []
+        for position, paragraph in enumerate(paragraphs):
+            text = paragraph.text or ""
+            token = self._visible_numbering_token(paragraph)
+            if position == 0 and token and not re.match(
+                rf"^\s*{re.escape(token)}",
+                text,
+            ):
+                text = f"{token}{text}"
+            rendered.append(text)
+        return "\n\n".join(rendered)
+
+    def _claim_context_text(self, issue):
+        """Return every Word paragraph belonging to the selected claim."""
+
+        context = self._claim_context(issue)
+        return context["text"] if context is not None else None
+
+    def _claim_context(self, issue):
+        """Return rendered claim text plus source-to-view offset mappings."""
+
+        if (
+            self.document is None
+            or issue.paragraph_index is None
+            or not (
+                issue.category == "claims"
+                or issue.section_key == "claims"
+                or str(issue.rule_id).startswith("CLM")
+            )
+        ):
+            return None
+
+        claim_paragraphs = [
+            paragraph
+            for paragraph in self.document.paragraphs
+            if not paragraph.is_heading
+            and (
+                paragraph.major_section_key == "claims"
+                or paragraph.section_key == "claims"
+            )
+        ]
+        anchor_position = next(
+            (
+                position
+                for position, paragraph in enumerate(claim_paragraphs)
+                if paragraph.index == issue.paragraph_index
+            ),
+            None,
+        )
+        if anchor_position is None:
+            return None
+
+        start_position = None
+        for position in range(anchor_position, -1, -1):
+            token = self._visible_numbering_token(claim_paragraphs[position])
+            if re.search(r"請求項\s*\d+", token):
+                start_position = position
+                break
+        if start_position is None:
+            return None
+
+        end_position = len(claim_paragraphs)
+        for position in range(start_position + 1, len(claim_paragraphs)):
+            token = self._visible_numbering_token(claim_paragraphs[position])
+            if re.search(r"請求項\s*\d+", token):
+                end_position = position
+                break
+
+        rendered_paragraphs = []
+        paragraph_spans = []
+        rendered_offset = 0
+        for position in range(start_position, end_position):
+            paragraph = claim_paragraphs[position]
+            text = paragraph.text or ""
+            token = self._visible_numbering_token(paragraph)
+            inserted_prefix_length = 0
+            if token and not re.match(
+                rf"^\s*{re.escape(token)}", text
+            ):
+                text = f"{token}{text}"
+                inserted_prefix_length = len(token)
+            if rendered_paragraphs:
+                rendered_offset += 2
+            paragraph_spans.append(
+                {
+                    "paragraph_index": paragraph.index,
+                    "rendered_start": rendered_offset,
+                    "rendered_end": rendered_offset + len(text),
+                    "source_start": rendered_offset + inserted_prefix_length,
+                    "source_length": len(paragraph.text or ""),
+                }
+            )
+            rendered_paragraphs.append(text)
+            rendered_offset += len(text)
+        return {
+            "text": "\n\n".join(rendered_paragraphs),
+            "paragraph_spans": paragraph_spans,
+        }
+
+    @staticmethod
+    def _non_whitespace_character_map(text, start=0):
+        characters = []
+        rendered_positions = []
+        for position in range(start, len(text)):
+            character = text[position]
+            if character.isspace():
+                continue
+            characters.append(character)
+            rendered_positions.append(position)
+        return "".join(characters), rendered_positions
+
+    @classmethod
+    def _claim_body_character_map(cls, text):
+        """Map whitespace-free claim-body offsets back to rendered text."""
+
+        prefix = re.match(
+            r"^\s*(?:[【〖]\s*)?請求項\s*\d+\s*(?:[】〗])?",
+            text or "",
+        )
+        body_start = prefix.end() if prefix is not None else 0
+        separator = re.match(r"\s*[:：、.．]\s*", text[body_start:])
+        if separator is not None:
+            body_start += separator.end()
+        return cls._non_whitespace_character_map(text, body_start)
+
+    @classmethod
+    def _resolved_claim_issue_span(cls, context, issue):
+        """Resolve a claim issue against the complete multi-paragraph view."""
+
+        text = context["text"]
+        if not text:
+            return issue.char_start, issue.char_end
+
+        highlight_text = re.sub(
+            r"\s+",
+            "",
+            str(issue.details.get("highlight_text", "")),
+        )
+        body_offset = issue.details.get("body_offset")
+        component_name = re.sub(
+            r"\s+",
+            "",
+            str(issue.details.get("component_name", "")),
+        )
+        if highlight_text and isinstance(body_offset, int):
+            normalized_body, positions = cls._claim_body_character_map(text)
+            if positions:
+                component_offset = (
+                    highlight_text.rfind(component_name)
+                    if component_name and component_name in highlight_text
+                    else 0
+                )
+                candidates = [
+                    match.start()
+                    for match in re.finditer(
+                        re.escape(highlight_text),
+                        normalized_body,
+                    )
+                ]
+                if candidates:
+                    normalized_start = min(
+                        candidates,
+                        key=lambda candidate: abs(
+                            candidate + component_offset - body_offset
+                        ),
+                    )
+                    normalized_end = normalized_start + len(highlight_text)
+                    if normalized_end <= len(positions):
+                        return (
+                            positions[normalized_start],
+                            positions[normalized_end - 1] + 1,
+                        )
+
+        # A rule's character range is local to its anchor Word paragraph.
+        # Convert it through the matching rendered segment before considering
+        # any claim-wide textual fallback.
+        for span in context.get("paragraph_spans", []):
+            if span["paragraph_index"] != issue.paragraph_index:
+                continue
+            start, end = issue.char_start, issue.char_end
+            if highlight_text:
+                segment = text[span["rendered_start"]:span["rendered_end"]]
+                normalized_segment, positions = cls._non_whitespace_character_map(
+                    segment
+                )
+                normalized_index = normalized_segment.find(highlight_text)
+                if normalized_index >= 0 and positions:
+                    return (
+                        span["rendered_start"] + positions[normalized_index],
+                        span["rendered_start"]
+                        + positions[normalized_index + len(highlight_text) - 1]
+                        + 1,
+                    )
+            if (
+                start is not None
+                and end is not None
+                and 0 <= start < end <= span["source_length"]
+            ):
+                return span["source_start"] + start, span["source_start"] + end
+            break
+
+        if highlight_text:
+            index = text.find(str(issue.details.get("highlight_text", "")).strip())
+            if index >= 0:
+                return index, index + len(str(issue.details.get("highlight_text", "")).strip())
+        return cls._resolved_issue_span(text, issue)
+
+    @staticmethod
+    def _resolved_issue_span(text, issue):
+        if not text:
+            return issue.char_start, issue.char_end
+
+        highlight_text = str(issue.details.get("highlight_text", "")).strip()
+        if highlight_text:
+            index = text.find(highlight_text)
+            if index >= 0:
+                return index, index + len(highlight_text)
+
+        start, end = issue.char_start, issue.char_end
+        has_precise_span = (
+            start is not None
+            and end is not None
+            and 0 <= start < end <= len(text)
+            and end - start <= 32
+        )
+        if has_precise_span:
+            return start, end
+
+        for candidate in re.findall(r"「([^」]{1,48})」", issue.message):
+            index = text.find(candidate)
+            if index >= 0:
+                return index, index + len(candidate)
+        return start, end
 
     @staticmethod
     def _highlighted_paragraph(text, start, end):
@@ -419,13 +803,13 @@ class PatentReviewPage(QWidget):
             "<div style='white-space:pre-wrap'>"
             f"{escape(text[:start])}"
             "<span style='background:#fecaca;color:#991b1b;font-weight:700'>"
-            f"{escape(text[start:end])}</span>{escape(text[end:])}</div>"
+            f"{escape(text[start:end])}</span>"
+            f"{escape(text[end:])}</div>"
         )
 
     def _clear_location_panel(self, message):
         self.selected_issue_title.setText("錯誤原文定位")
-        self.error_type_label.setText(f"錯誤種類：{message}")
-        self.error_location_label.setText("原文位置：無")
+        self.original_paragraph_view.setPlaceholderText(message)
         self.original_paragraph_view.clear()
 
     def publish_to_ocr(self):

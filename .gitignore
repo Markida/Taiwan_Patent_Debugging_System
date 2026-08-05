@@ -38,6 +38,10 @@ runs/v3/
 # Output files
 outputs/
 output/
+custom_text_rules.json
+custom_text_rules.json.tmp
+app/features/snake/snake_scores.json
+app/features/snake/snake_scores.json.tmp
 pdf_pages/
 rotated_images/
 result_txt/

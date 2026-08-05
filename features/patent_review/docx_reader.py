@@ -6,6 +6,7 @@ import hashlib
 import mimetypes
 from pathlib import Path
 import posixpath
+import re
 from typing import Dict, Iterator, List, Optional, Tuple
 from urllib.parse import unquote
 import xml.etree.ElementTree as ET
@@ -361,12 +362,118 @@ def _paragraph_numbering(
 
 def _render_numbering_text(value: int, number_format: str, template: str) -> str:
     if number_format == "decimalZero":
-        # TIPO patent paragraphs use a four-digit Arabic value.  Word's
-        # decimalZero token is otherwise implementation-dependent in width.
-        rendered_value = f"{value:04d}" if "〖" in template or "【" in template else f"{value:02d}"
+        # Word renders decimalZero as at least two digits.  Company templates
+        # commonly use a level template such as ``【00%1】`` to reach four
+        # digits.  Do not pre-pad to four digits in that case or the visible
+        # value incorrectly becomes ``【000001】``.
+        has_literal_zero_prefix = re.search(r"0+%1", template) is not None
+        if has_literal_zero_prefix:
+            rendered_value = f"{value:02d}"
+        elif "〖" in template or "【" in template:
+            rendered_value = f"{value:04d}"
+        else:
+            rendered_value = f"{value:02d}"
     else:
         rendered_value = str(value)
     return template.replace("%1", rendered_value)
+
+
+def _int_attribute(node: Optional[ET.Element], name: str) -> Optional[int]:
+    if node is None:
+        return None
+    value = node.get(f"{{{W_NS}}}{name}", "")
+    if value.lstrip("-").isdigit():
+        return int(value)
+    return None
+
+
+def _paragraph_format(paragraph: ET.Element) -> Dict[str, object]:
+    """Extract the directly visible paragraph properties needed by strict review."""
+
+    ppr = paragraph.find("w:pPr", NS)
+    alignment_node = paragraph.find("w:pPr/w:jc", NS)
+    spacing_node = paragraph.find("w:pPr/w:spacing", NS)
+    indent_node = paragraph.find("w:pPr/w:ind", NS)
+    paragraph_run_properties = paragraph.find("w:pPr/w:rPr", NS)
+    first_run_properties = paragraph.find("w:r/w:rPr", NS)
+
+    def property_node(tag: str) -> Optional[ET.Element]:
+        if paragraph_run_properties is not None:
+            node = paragraph_run_properties.find(f"w:{tag}", NS)
+            if node is not None:
+                return node
+        if first_run_properties is not None:
+            return first_run_properties.find(f"w:{tag}", NS)
+        return None
+
+    section = paragraph.find("w:pPr/w:sectPr", NS)
+    section_type = ""
+    if section is not None:
+        type_node = section.find("w:type", NS)
+        section_type = (
+            type_node.get(f"{{{W_NS}}}val", "nextPage")
+            if type_node is not None
+            else "nextPage"
+        )
+
+    hard_page_break = any(
+        node.get(f"{{{W_NS}}}type", "textWrapping") == "page"
+        for node in paragraph.iter(W_BR)
+    )
+    return {
+        "paragraph_alignment": (
+            alignment_node.get(f"{{{W_NS}}}val", "")
+            if alignment_node is not None
+            else ""
+        ),
+        "font_size_half_points": _int_attribute(property_node("sz"), "val"),
+        "complex_font_size_half_points": _int_attribute(
+            property_node("szCs"), "val"
+        ),
+        "line_spacing": _int_attribute(spacing_node, "line"),
+        "line_spacing_rule": (
+            spacing_node.get(f"{{{W_NS}}}lineRule", "")
+            if spacing_node is not None
+            else ""
+        ),
+        "left_indent": _int_attribute(indent_node, "left"),
+        "first_line_indent": _int_attribute(indent_node, "firstLine"),
+        "first_line_chars": _int_attribute(indent_node, "firstLineChars"),
+        "hanging_indent": _int_attribute(indent_node, "hanging"),
+        "page_break_before": (
+            ppr is not None and ppr.find("w:pageBreakBefore", NS) is not None
+        ),
+        "has_hard_page_break": hard_page_break,
+        "section_break_type": section_type,
+    }
+
+
+def _section_layouts(body: ET.Element) -> List[Dict[str, object]]:
+    layouts: List[Dict[str, object]] = []
+    for index, section in enumerate(body.findall(".//w:sectPr", NS)):
+        size = section.find("w:pgSz", NS)
+        margin = section.find("w:pgMar", NS)
+        type_node = section.find("w:type", NS)
+        layouts.append(
+            {
+                "index": index,
+                "break_type": (
+                    type_node.get(f"{{{W_NS}}}val", "nextPage")
+                    if type_node is not None
+                    else "nextPage"
+                ),
+                "width": _int_attribute(size, "w"),
+                "height": _int_attribute(size, "h"),
+                "margin_top": _int_attribute(margin, "top"),
+                "margin_right": _int_attribute(margin, "right"),
+                "margin_bottom": _int_attribute(margin, "bottom"),
+                "margin_left": _int_attribute(margin, "left"),
+                "header": _int_attribute(margin, "header"),
+                "footer": _int_attribute(margin, "footer"),
+                "gutter": _int_attribute(margin, "gutter"),
+            }
+        )
+    return layouts
 
 
 def _paragraph_images(paragraph: ET.Element) -> Tuple[List[str], List[str]]:
@@ -485,6 +592,7 @@ def parse_docx(path: Path | str) -> PatentDocument:
                             template,
                         )
                 relationship_ids, alt_texts = _paragraph_images(element)
+                paragraph_format = _paragraph_format(element)
                 paragraph = PatentParagraph(
                     index=index,
                     text=text,
@@ -503,6 +611,7 @@ def parse_docx(path: Path | str) -> PatentDocument:
                     cell_index=cell_index,
                     run_spans=run_spans,
                     image_relationship_ids=relationship_ids,
+                    **paragraph_format,
                 )
                 paragraphs.append(paragraph)
                 for relation_id in relationship_ids:
@@ -533,6 +642,7 @@ def parse_docx(path: Path | str) -> PatentDocument:
                 paragraphs=paragraphs,
                 sections=sections,
                 images=list(images_by_id.values()),
+                page_layouts=_section_layouts(body),
                 warnings=warnings,
             )
     except BadZipFile as exc:

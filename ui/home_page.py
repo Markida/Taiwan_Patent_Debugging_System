@@ -2,18 +2,30 @@ from PySide6.QtWidgets import (
     QWidget,
     QPushButton,
     QLabel,
+    QHBoxLayout,
     QVBoxLayout,
     QFrame
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 
 class HomePage(QWidget):
-    def __init__(self, features, open_feature_callback):
+    def __init__(
+        self,
+        features,
+        open_feature_callback,
+        open_secret_callback=None,
+    ):
         super().__init__()
 
         self.features = features
         self.open_feature_callback = open_feature_callback
+        self.open_secret_callback = open_secret_callback
+        self._secret_click_count = 0
+        self._secret_click_timer = QTimer(self)
+        self._secret_click_timer.setSingleShot(True)
+        self._secret_click_timer.setInterval(2500)
+        self._secret_click_timer.timeout.connect(self._reset_secret_clicks)
 
         self.build_ui()
 
@@ -24,9 +36,21 @@ class HomePage(QWidget):
         layout.setContentsMargins(70, 70, 70, 70)
         layout.setSpacing(24)
 
-        title = QLabel("Saint-Island_Patent_MDS")
-        title.setAlignment(Qt.AlignCenter)
-        title.setObjectName("HomeTitle")
+        title_row = QHBoxLayout()
+        title_row.setSpacing(0)
+        title_row.setAlignment(Qt.AlignCenter)
+        title_prefix = QLabel("Saint-Island_")
+        title_prefix.setObjectName("HomeTitle")
+        title_suffix = QLabel("atent_MDS")
+        title_suffix.setObjectName("HomeTitle")
+        self.secret_p_button = QPushButton("P")
+        self.secret_p_button.setObjectName("HiddenTitleLetter")
+        self.secret_p_button.setFlat(True)
+        self.secret_p_button.setFocusPolicy(Qt.NoFocus)
+        self.secret_p_button.clicked.connect(self._secret_title_clicked)
+        title_row.addWidget(title_prefix)
+        title_row.addWidget(self.secret_p_button)
+        title_row.addWidget(title_suffix)
 
         subtitle = QLabel("Patent Mistake Detection System")
         subtitle.setAlignment(Qt.AlignCenter)
@@ -50,6 +74,8 @@ class HomePage(QWidget):
         card_layout.addWidget(card_title)
 
         for feature in self.features:
+            if not feature.get("show_on_home", True):
+                continue
             button = QPushButton(feature["title"])
             button.setObjectName("PrimaryHomeButton")
             button.setMinimumHeight(56)
@@ -71,7 +97,7 @@ class HomePage(QWidget):
         card.setLayout(card_layout)
 
         layout.addStretch()
-        layout.addWidget(title)
+        layout.addLayout(title_row)
         layout.addWidget(subtitle)
         layout.addWidget(description)
         layout.addSpacing(14)
@@ -79,3 +105,16 @@ class HomePage(QWidget):
         layout.addStretch()
 
         self.setLayout(layout)
+
+    def _secret_title_clicked(self):
+        self._secret_click_count += 1
+        self._secret_click_timer.start()
+        if self._secret_click_count < 5:
+            return
+        self._reset_secret_clicks()
+        if callable(self.open_secret_callback):
+            self.open_secret_callback()
+
+    def _reset_secret_clicks(self):
+        self._secret_click_timer.stop()
+        self._secret_click_count = 0

@@ -151,6 +151,56 @@ QPushButton {
     line-height: 1.45;
 }
 
+#HiddenTitleLetter {
+    color: #0b1f33;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    font-size: 58px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    padding: 0;
+    margin: 0;
+    min-width: 50px;
+    max-width: 50px;
+}
+
+#HiddenTitleLetter:hover,
+#HiddenTitleLetter:pressed {
+    color: #0b1f33;
+    background: transparent;
+    border: none;
+}
+
+#FeatureNavigation {
+    background: #dbe5f0;
+    border: 1px solid #c4d2e1;
+    border-radius: 9px;
+}
+
+#FeatureNavigationButton {
+    background: #f8fafc;
+    color: #18324b;
+    border: 1px solid #b8c8d8;
+    border-radius: 7px;
+    font-weight: 700;
+    padding: 5px 12px;
+}
+
+#FeatureNavigationButton:hover {
+    background: #e7eef6;
+    border-color: #7893ad;
+}
+
+#ActiveFeatureNavigationButton {
+    background: #18324b;
+    color: #ffffff;
+    border: 1px solid #0f2742;
+    border-radius: 7px;
+    font-weight: 800;
+    padding: 5px 12px;
+}
+
 #ResultText QScrollBar:vertical {
     background: #eef2f7;
     border: none;
@@ -188,6 +238,98 @@ QPushButton {
     gridline-color: #dbe3ec;
     selection-background-color: #bfdbfe;
     selection-color: #111827;
+    font-size: 12pt;
+}
+
+#ComparisonStatus {
+    background: #e2e8f0;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-weight: 700;
+}
+
+#ComparisonText {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    padding: 10px;
+    font-family: "Microsoft JhengHei";
+    font-size: 14pt;
+}
+
+#ComparisonImage {
+    background: #f8fafc;
+    color: #64748b;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+}
+
+#ComparisonResult {
+    background: #fff7ed;
+    color: #172033;
+    border: 2px solid #f59e0b;
+    border-radius: 11px;
+    padding: 14px 16px;
+    font-size: 16pt;
+    font-weight: 700;
+}
+
+#SnakeTitle {
+    color: #0f766e;
+    font-size: 28px;
+    font-weight: 900;
+    letter-spacing: 8px;
+}
+
+#SnakeScore {
+    color: #0f2742;
+    font-size: 20px;
+    font-weight: 800;
+}
+
+#SnakeBoard {
+    border: 2px solid #1e3a52;
+    border-radius: 8px;
+}
+
+#SnakeBonus {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    padding: 8px;
+    font-weight: 800;
+}
+
+#SnakeLeaderboard {
+    background: #0f1f31;
+    alternate-background-color: #162a40;
+    color: #ffffff;
+    border: 1px solid #334e68;
+    border-radius: 8px;
+    gridline-color: #334e68;
+    selection-background-color: #275b7a;
+    selection-color: #ffffff;
+    font-size: 14pt;
+}
+
+#SnakeLeaderboard QHeaderView::section {
+    background: #18324b;
+    color: #ffffff;
+    border: none;
+    border-right: 1px solid #3d5870;
+    border-bottom: 1px solid #3d5870;
+    padding: 8px 5px;
+    font-size: 13pt;
+    font-weight: 800;
+}
+
+#SnakeLeaderboard QTableCornerButton::section {
+    background: #18324b;
+    border: none;
 }
 
 #ReviewTable QHeaderView::section {
@@ -197,6 +339,7 @@ QPushButton {
     border-right: 1px solid #cbd5e1;
     border-bottom: 1px solid #cbd5e1;
     padding: 5px;
+    font-size: 12pt;
     font-weight: 700;
 }
 
@@ -229,6 +372,26 @@ QPushButton {
 #PrimaryButton:disabled {
     background-color: #9ca3af;
     color: #f3f4f6;
+}
+
+#RecognitionStartButton {
+    background-color: #dc2626;
+    color: #ffffff;
+    border: 2px solid #991b1b;
+    border-radius: 9px;
+    padding: 7px 18px;
+    font-weight: 900;
+}
+
+#RecognitionStartButton:hover {
+    background-color: #b91c1c;
+    color: #ffffff;
+}
+
+#RecognitionStartButton:disabled {
+    background-color: #9ca3af;
+    color: #f3f4f6;
+    border-color: #6b7280;
 }
 
 #SecondaryButton {

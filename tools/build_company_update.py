@@ -15,7 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RELEASE_ROOT = PROJECT_ROOT / "release"
-UPDATE_DESCRIPTION = "文件偵錯與拖放更新"
+UPDATE_DESCRIPTION = "標點規則與圖式缺失比對介面更新"
 MODEL_FILES = (
     "class_map.json",
     "patent_char_v4_company_approved_recall.onnx",
@@ -33,13 +33,29 @@ REQUIRED_PACKAGE_FILES = (
     "app/main.py",
     "app/app/config.py",
     "app/app/main_window.py",
+    "app/app/paths.py",
+    "app/app/resources/app_icon.ico",
+    "app/app/resources/app_icon.png",
+    "app/app/styles.py",
     "app/app/workflow_context.py",
+    "app/app/features/snake/__init__.py",
+    "app/app/features/snake/score_store.py",
     "app/features/registry.py",
     "app/features/patent_review/docx_reader.py",
+    "app/features/patent_review/custom_rules.py",
+    "app/features/patent_review/figure_ocr_checker.py",
+    "app/features/patent_review/models.py",
     "app/features/patent_review/rule_engine.py",
+    "app/features/patent_review/section_parser.py",
+    "app/features/patent_review/symbol_transfer.py",
+    "app/ui/custom_text_rule_dialog.py",
+    "app/ui/demo_tool_page.py",
+    "app/ui/embodiment_figure_compare_page.py",
+    "app/ui/feature_navigation.py",
     "app/ui/file_drop.py",
     "app/ui/patent_review_page.py",
     "app/ui/recognition_page.py",
+    "app/ui/snake_game_page.py",
     "app/models/patent_char_v4_company_approved_recall.onnx",
 )
 
@@ -63,7 +79,13 @@ def copy_source_tree(source: Path, destination: Path) -> None:
     shutil.copytree(
         source,
         destination,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            "*.pyo",
+            "snake_scores.json",
+            "snake_scores.json.tmp",
+        ),
     )
 
 
@@ -77,6 +99,9 @@ def compile_launcher(destination: Path) -> None:
     )
     if not csc.is_file():
         raise FileNotFoundError(f".NET Framework C# compiler is missing: {csc}")
+    icon = PROJECT_ROOT / "app" / "resources" / "app_icon.ico"
+    if not icon.is_file():
+        raise FileNotFoundError(f"Application icon is missing: {icon}")
     subprocess.run(
         [
             str(csc),
@@ -84,6 +109,7 @@ def compile_launcher(destination: Path) -> None:
             "/target:winexe",
             "/platform:x64",
             "/optimize+",
+            f"/win32icon:{icon}",
             "/reference:System.Windows.Forms.dll",
             f"/out:{destination}",
             str(PROJECT_ROOT / "packaging" / "Saint-IslandPatentOCR.Launcher.cs"),
@@ -101,14 +127,16 @@ def release_notes(version: str) -> str:
 也不需要安裝 Python、Conda、套件或連線到外網。
 
 主要更新
-1. 新增「專利文件偵錯」頁，可唯讀擷取完整專利說明書 DOCX。
-2. 新增 22 條格式與一致性檢核，包含段號、章節、圖號、符號及請求項。
-3. 完整符號說明與代表圖符號說明可分別送到圖片 OCR 比對。
-4. OCR 頁新增「回文件偵錯」按鈕，往返頁面時保留暫存資料。
-5. 文件頁可拖入單一 DOCX；OCR 頁可拖入單一 PDF。
-6. 副檔名錯誤、多檔案或非本機檔案會顯示原因，不會清除現有結果。
-7. 保留 v4 高召回模型、字母誤判過濾、低信心人工修正及結果排序。
-8. 更新啟動器，修復舊版離線自測可能永久等待且不回報錯誤的問題。
+1. 新增摘要、說明書數字段落、圖式簡單說明及請求項的結尾標點偵錯規則。
+2. 獨立項跨行內容會依序檢查全形冒號、分號、「；及」與句號。
+3. 「實施方式與圖式比對 (beta)」左側改為可點選段落清單與段落原文上下視窗。
+4. 段落原文中的元件標號以紅框顯示；選取段落時會自動跳到最前面的參閱圖式頁。
+5. 比對結果放大並改名為「圖式缺失標號」，只偵錯段落有但參閱圖式沒有的標號；圖式額外標號不再報錯。
+6. OCR 頁清單切換按鈕改名為「完整/代表圖 符號切換」。
+7. OCR 頁「第一步.圖片數字英文辨識」改為紅底醒目按鈕。
+8. 修正跨多個 Word 段落的請求項錯誤紅框偏移，並可正確定位同一詞語的實際出錯位置。
+9. 重新啟用發明／新型申請專利範圍的元件相似詞警告，並保留白名單與合法差異排除規則。
+10. 既有 OCR 模型、人工修訂結果、自訂文字規則、符號清單及公司端離線 runtime 均維持相容。
 
 安裝方式
 1. 完全關閉 Saint-Island_Patent_MDS。
@@ -123,6 +151,7 @@ Install_Update.bat 上。安裝失敗時執行 Startup_Diagnostic.bat，並回�
 
 重要
 - 請勿只複製單一 EXE；公司端原有 app、runtime、models 必須保持同層結構。
+- 安裝器不會刪除或覆蓋程式根目錄既有的 custom_text_rules.json。
 - 本程式不修改或輸出修正版 Word；正式修訂仍由使用者回原始文件完成。
 """
 

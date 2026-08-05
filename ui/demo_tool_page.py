@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ui.feature_navigation import FeatureNavigationBar
 
 
 class DemoToolPage(QWidget):
@@ -18,23 +19,26 @@ class DemoToolPage(QWidget):
         self.go_home_callback = go_home_callback
         self.build_ui()
 
+    def set_feature_navigation(self, features, open_feature_callback):
+        self.feature_navigation.configure(features, open_feature_callback)
+
     def build_ui(self):
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(24, 18, 24, 24)
-        main_layout.setSpacing(18)
+        main_layout.setContentsMargins(10, 4, 10, 10)
+        main_layout.setSpacing(6)
+
+        self.feature_navigation = FeatureNavigationBar(
+            self.go_home_callback,
+            "demo_tool",
+        )
+        main_layout.addWidget(self.feature_navigation)
 
         header_layout = QHBoxLayout()
-
-        back_button = QPushButton("返回首頁")
-        back_button.setObjectName("SecondaryButton")
-        back_button.setMaximumHeight(34)
-        back_button.clicked.connect(self.go_home_callback)
 
         title = QLabel("功能測試頁")
         title.setObjectName("PageTitle")
         title.setMaximumHeight(34)
 
-        header_layout.addWidget(back_button)
         header_layout.addWidget(title)
         header_layout.addStretch()
 

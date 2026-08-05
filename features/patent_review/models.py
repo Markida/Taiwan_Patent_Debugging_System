@@ -35,10 +35,24 @@ class PatentParagraph:
     cell_index: Optional[int] = None
     run_spans: List[TextRunSpan] = field(default_factory=list)
     image_relationship_ids: List[str] = field(default_factory=list)
+    major_section_key: Optional[str] = None
+    major_section_title: str = ""
     section_key: Optional[str] = None
     section_title: str = ""
     is_heading: bool = False
     content_text: str = ""
+    paragraph_alignment: str = ""
+    font_size_half_points: Optional[int] = None
+    complex_font_size_half_points: Optional[int] = None
+    line_spacing: Optional[int] = None
+    line_spacing_rule: str = ""
+    left_indent: Optional[int] = None
+    first_line_indent: Optional[int] = None
+    first_line_chars: Optional[int] = None
+    hanging_indent: Optional[int] = None
+    page_break_before: bool = False
+    has_hard_page_break: bool = False
+    section_break_type: str = ""
 
 
 @dataclass
@@ -50,6 +64,8 @@ class PatentSection:
     heading_text: str
     heading_paragraph_index: int
     paragraph_indices: List[int] = field(default_factory=list)
+    level: str = "medium"
+    major_section_key: str = ""
 
 
 @dataclass
@@ -79,6 +95,7 @@ class PatentDocument:
     paragraphs: List[PatentParagraph] = field(default_factory=list)
     sections: List[PatentSection] = field(default_factory=list)
     images: List[EmbeddedImage] = field(default_factory=list)
+    page_layouts: List[Dict[str, Any]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     schema_version: str = "1.0"
 
@@ -153,6 +170,7 @@ class PatentTextReview:
     patent_type: str
     patent_title: str
     generated_at_utc: str
+    claim_subjects: List[str] = field(default_factory=list)
     issues: List[PatentIssue] = field(default_factory=list)
     rule_catalog: List[RuleDefinition] = field(default_factory=list)
     parse_warnings: List[str] = field(default_factory=list)

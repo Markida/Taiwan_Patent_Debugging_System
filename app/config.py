@@ -1,4 +1,4 @@
-APP_VERSION = "1.09.0"
+APP_VERSION = "2.0.4"
 APP_NAME = f"Saint-Island_Patent_MDS v{APP_VERSION}"
 
 # 公司區域網路錯誤回報資料夾。
@@ -72,5 +72,7 @@ RECOGNITION_MODE = "auto"
 # PDF 轉圖解析度
 PDF_DPI = 300
 
-# 圖片預覽最大放大倍率
-MAX_IMAGE_PREVIEW_ZOOM = 2.0
+# 圖片預覽最大放大倍率（相對於「適合視窗」尺寸）。
+# 300 DPI 的專利頁面在一般視窗中通常只顯示約 15%～25%，因此需要較高的
+# 相對倍率，才能讓使用者用滾輪看回接近原始像素的字元細節。
+MAX_IMAGE_PREVIEW_ZOOM = 6.0

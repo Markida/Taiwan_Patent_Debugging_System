@@ -43,6 +43,11 @@ from features.patent_review.symbol_transfer import (
     REPRESENTATIVE_SYMBOL_SOURCE,
     SOURCE_TITLES,
 )
+from features.patent_review.figure_ocr_checker import (
+    infer_figure_number,
+    parse_figure_number_mapping,
+)
+from ui.feature_navigation import FeatureNavigationBar
 from ui.file_drop import SingleFileDropController
 
 
@@ -61,6 +66,30 @@ class ReviewOrderTableWidgetItem(QTableWidgetItem):
         if own_value is not None and other_value is not None:
             return tuple(own_value) < tuple(other_value)
         return super().__lt__(other)
+
+
+class ZoomableImageScrollArea(QScrollArea):
+    """Turn an ordinary mouse wheel into a preview zoom control."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.zoom_handler = None
+
+    def wheelEvent(self, event):
+        angle_delta = event.angleDelta().y()
+        pixel_delta = event.pixelDelta().y()
+        if callable(self.zoom_handler) and (angle_delta or pixel_delta):
+            # A conventional mouse-wheel notch is 120 angle units.  The pixel
+            # fallback also supports touchpads which do not provide angleDelta.
+            steps = (
+                angle_delta / 120.0
+                if angle_delta
+                else pixel_delta / 30.0
+            )
+            self.zoom_handler(steps, event.position().toPoint())
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class RecognitionPage(QWidget):
@@ -85,8 +114,12 @@ class RecognitionPage(QWidget):
         self._reference_symbol_source = FULL_SYMBOL_SOURCE
         self._document_reference_drafts = {}
         self._updating_reference_source = False
+        self.figure_number_mappings = {}
         self.current_preview_index = 0
         self.current_pixmap = None
+        self._preview_image_key = None
+        self._preview_fit_scale = 1.0
+        self.preview_zoom_factor = 1.0
 
         self.build_ui()
         self.file_drop_controller = SingleFileDropController(
@@ -101,6 +134,9 @@ class RecognitionPage(QWidget):
 
         self.open_feature_callback = callback
 
+    def set_feature_navigation(self, features, open_feature_callback):
+        self.feature_navigation.configure(features, open_feature_callback)
+
     def open_patent_review(self):
         if callable(self.open_feature_callback):
             self.open_feature_callback("patent_review")
@@ -113,6 +149,17 @@ class RecognitionPage(QWidget):
         self.workflow_context = workflow_context
         workflow_context.subscribe_symbol_transfer(
             self.load_document_symbol_transfer
+        )
+        if self.all_results:
+            self._publish_reviewed_ocr_results()
+
+    def _publish_reviewed_ocr_results(self):
+        """Keep document-to-drawing checks synchronized with manual edits."""
+
+        if self.workflow_context is None or not self.all_results:
+            return
+        self.workflow_context.publish_ocr_results(
+            self.collect_reviewed_results()
         )
 
     def load_document_symbol_transfer(self, transfer):
@@ -189,8 +236,10 @@ class RecognitionPage(QWidget):
         self.reference_source_button.setChecked(
             symbol_source == REPRESENTATIVE_SYMBOL_SOURCE
         )
-        self.reference_source_button.setText(
-            f"比對清單：{SOURCE_TITLES[symbol_source]}"
+        self.reference_source_button.setText("完整/代表圖 符號切換")
+        self.reference_source_button.setToolTip(
+            "在完整符號說明與代表圖符號說明之間切換。\n"
+            f"目前使用：{SOURCE_TITLES[symbol_source]}"
         )
         self._updating_reference_source = False
 
@@ -204,31 +253,22 @@ class RecognitionPage(QWidget):
 
     def build_ui(self):
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(14, 8, 14, 10)
+        main_layout.setContentsMargins(10, 4, 10, 10)
         main_layout.setSpacing(6)
 
-        header_layout = QHBoxLayout()
-
-        back_button = QPushButton("← 回首頁")
-        back_button.setObjectName("SecondaryButton")
-        back_button.setMaximumHeight(34)
-        back_button.clicked.connect(self.go_home_callback)
-
-        self.document_review_button = QPushButton("← 回文件偵錯")
-        self.document_review_button.setObjectName("SecondaryButton")
-        self.document_review_button.setMaximumHeight(34)
-        self.document_review_button.setToolTip(
-            "返回專利文件偵錯頁；目前已暫存的 OCR 與清單內容會保留"
+        self.feature_navigation = FeatureNavigationBar(
+            self.go_home_callback,
+            "patent_ocr",
         )
-        self.document_review_button.clicked.connect(self.open_patent_review)
+        main_layout.addWidget(self.feature_navigation)
+
+        header_layout = QHBoxLayout()
 
         title = QLabel("圖片標號識別")
         title.setObjectName("PageTitle")
         title.setMaximumHeight(34)
         title.setContentsMargins(0, 0, 0, 0)
 
-        header_layout.addWidget(back_button)
-        header_layout.addWidget(self.document_review_button)
         header_layout.addWidget(title)
         header_layout.addStretch()
 
@@ -242,12 +282,12 @@ class RecognitionPage(QWidget):
         self.model_line.setMaximumHeight(34)
 
         recommended_models = [
+            get_models_dir() / "patent_label_group_v1.onnx",
+            get_models_dir() / "patent_label_group_v1.pt",
             get_models_dir() / "patent_char_v4_company_approved_recall.onnx",
             get_models_dir() / "patent_char_v4_company_approved_recall.pt",
             get_models_dir() / "patent_char_v3_consensus.onnx",
             get_models_dir() / "patent_char_v3_consensus.pt",
-            get_models_dir() / "patent_label_group_v1.onnx",
-            get_models_dir() / "patent_label_group_v1.pt",
         ]
         for recommended_model in recommended_models:
             if recommended_model.exists():
@@ -295,7 +335,7 @@ class RecognitionPage(QWidget):
         self.preview_action_layout = QHBoxLayout()
 
         self.run_button = QPushButton("第一步.圖片數字英文辨識")
-        self.run_button.setObjectName("PrimaryButton")
+        self.run_button.setObjectName("RecognitionStartButton")
         self.run_button.clicked.connect(self.run_batch_recognition)
 
         self.compare_button = QPushButton("第二步.辨識結果與標號清單比對")
@@ -312,6 +352,20 @@ class RecognitionPage(QWidget):
         self.next_button.setObjectName("SecondaryButton")
         self.next_button.clicked.connect(self.show_next_preview)
         self.next_button.setEnabled(False)
+
+        self.figure_mapping_line = QLineEdit()
+        self.figure_mapping_line.setObjectName("InputLine")
+        self.figure_mapping_line.setPlaceholderText("例如 1,2 或 1-4")
+        self.figure_mapping_line.setMaximumWidth(112)
+        self.figure_mapping_line.setMaximumHeight(34)
+        self.figure_mapping_line.setEnabled(False)
+        self.figure_mapping_line.setToolTip(
+            "設定目前這一頁包含的圖號，例如 1、1,2 或 1-4。\n"
+            "單圖頁採完全一致比對；多圖頁只引用部分圖式時會自動改採子集合比對。"
+        )
+        self.figure_mapping_line.editingFinished.connect(
+            self.apply_current_figure_mapping
+        )
 
         self.rotate_button = QPushButton("右旋 90°")
         self.rotate_button.setObjectName("SecondaryButton")
@@ -348,6 +402,8 @@ class RecognitionPage(QWidget):
         self.preview_action_layout.addWidget(QLabel("圖片預覽："))
         self.preview_action_layout.addWidget(self.prev_button)
         self.preview_action_layout.addWidget(self.next_button)
+        self.preview_action_layout.addWidget(QLabel("本頁包含圖號："))
+        self.preview_action_layout.addWidget(self.figure_mapping_line)
         self.preview_action_layout.addWidget(self.rotate_button)
         self.preview_action_layout.addWidget(self.show_all_boxes_button)
         self.preview_action_layout.addWidget(self.export_review_button)
@@ -371,17 +427,35 @@ class RecognitionPage(QWidget):
         self.preview_title.setObjectName("PanelTitle")
         self.preview_title.setMaximumHeight(30)
 
+        self.preview_zoom_status = QLabel("滾輪縮放：適合視窗")
+        self.preview_zoom_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.preview_zoom_status.setToolTip(
+            "將滑鼠移到圖片上，向上滾動放大、向下滾動縮小。"
+        )
+
+        preview_title_layout = QHBoxLayout()
+        preview_title_layout.setContentsMargins(0, 0, 0, 0)
+        preview_title_layout.addWidget(self.preview_title)
+        preview_title_layout.addStretch()
+        preview_title_layout.addWidget(self.preview_zoom_status)
+
         self.image_preview = QLabel("請先選擇圖片或 PDF")
         self.image_preview.setAlignment(Qt.AlignCenter)
         self.image_preview.setObjectName("ImagePreview")
-        self.image_preview.setMinimumSize(600, 500)
+        self.image_preview.setMinimumSize(1, 1)
+        self.image_preview.resize(600, 500)
+        self.image_preview.setToolTip(
+            "滑鼠滾輪：放大／縮小；放大後可使用捲軸移動檢視範圍。"
+        )
 
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area = ZoomableImageScrollArea()
+        self.scroll_area.setWidgetResizable(False)
+        self.scroll_area.setAlignment(Qt.AlignCenter)
         self.scroll_area.setWidget(self.image_preview)
         self.scroll_area.setObjectName("ImageScrollArea")
+        self.scroll_area.zoom_handler = self.zoom_preview_at
 
-        left_layout.addWidget(self.preview_title)
+        left_layout.addLayout(preview_title_layout)
         left_layout.addWidget(self.scroll_area)
 
         left_panel.setLayout(left_layout)
@@ -400,7 +474,7 @@ class RecognitionPage(QWidget):
         reference_header = QHBoxLayout()
         reference_header.addWidget(reference_title)
         reference_header.addStretch()
-        self.reference_source_button = QPushButton("比對清單：完整符號說明")
+        self.reference_source_button = QPushButton("完整/代表圖 符號切換")
         self.reference_source_button.setObjectName("SecondaryButton")
         self.reference_source_button.setCheckable(True)
         self.reference_source_button.setChecked(False)
@@ -554,6 +628,66 @@ class RecognitionPage(QWidget):
             self.model_path = file_path
             self.model_line.setText(file_path)
 
+    def _initialize_figure_number_mappings(self, image_paths):
+        self.figure_number_mappings = {
+            index: [infer_figure_number(path, index + 1)]
+            for index, path in enumerate(image_paths)
+        }
+        self._sync_figure_mapping_control(self.current_preview_index)
+
+    def _figure_numbers_for_index(self, image_index):
+        return list(
+            self.figure_number_mappings.get(image_index, [image_index + 1])
+        )
+
+    def _set_result_figure_mapping(self, result, image_index):
+        figures = self._figure_numbers_for_index(image_index)
+        result["figure_numbers"] = figures
+        if len(figures) == 1:
+            result["figure_number"] = figures[0]
+        else:
+            result.pop("figure_number", None)
+
+    def _sync_figure_mapping_control(self, image_index):
+        has_image = bool(self.image_paths) and 0 <= image_index < len(self.image_paths)
+        self.figure_mapping_line.setEnabled(has_image)
+        if not has_image:
+            self.figure_mapping_line.clear()
+            return
+        figures = self._figure_numbers_for_index(image_index)
+        self.figure_mapping_line.setText(",".join(str(number) for number in figures))
+
+    def apply_current_figure_mapping(self):
+        if not self.image_paths:
+            return True
+        image_index = max(
+            0,
+            min(self.current_preview_index, len(self.image_paths) - 1),
+        )
+        previous = self._figure_numbers_for_index(image_index)
+        try:
+            figures = parse_figure_number_mapping(
+                self.figure_mapping_line.text()
+            )
+        except ValueError as error:
+            self.figure_mapping_line.setText(
+                ",".join(str(number) for number in previous)
+            )
+            QMessageBox.warning(self, "圖號格式錯誤", str(error))
+            return False
+
+        self.figure_number_mappings[image_index] = figures
+        self.figure_mapping_line.setText(
+            ",".join(str(number) for number in figures)
+        )
+        if image_index < len(self.all_results):
+            self._set_result_figure_mapping(
+                self.all_results[image_index],
+                image_index,
+            )
+            self._publish_reviewed_ocr_results()
+        return True
+
     def select_images(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
@@ -566,6 +700,7 @@ class RecognitionPage(QWidget):
             self.source_image_paths = list(file_paths)
             self.image_paths = list(file_paths)
             self.reset_review_state()
+            self._initialize_figure_number_mappings(file_paths)
 
             if len(file_paths) == 1:
                 self.image_line.setText(file_paths[0])
@@ -622,6 +757,7 @@ class RecognitionPage(QWidget):
             self.image_paths = pdf_image_paths
             self.source_image_paths = list(pdf_image_paths)
             self.reset_review_state()
+            self._initialize_figure_number_mappings(pdf_image_paths)
             self.current_preview_index = 0
 
             self.image_line.setText(
@@ -666,6 +802,9 @@ class RecognitionPage(QWidget):
             QMessageBox.warning(self, "缺少檔案", "請先選擇圖片或 PDF。")
             return
 
+        if not self.apply_current_figure_mapping():
+            return
+
         self.model_path = self.model_line.text()
         self.reference_items = []
         self.deleted_review_entries = {}
@@ -689,6 +828,7 @@ class RecognitionPage(QWidget):
         self.add_label_button.setEnabled(False)
         self.delete_label_button.setEnabled(False)
         self.review_table.setEnabled(False)
+        self.figure_mapping_line.setEnabled(False)
 
         self.worker = BatchRecognitionWorker(
             image_paths=self.source_image_paths,
@@ -709,6 +849,7 @@ class RecognitionPage(QWidget):
                 result.get("original_image_path", result.get("image_path", ""))
             ).name
             result["image_name"] = f"Pic_{image_index + 1:02d}"
+            self._set_result_figure_mapping(result, image_index)
             for detection in result.get("detections", []):
                 detection.setdefault(
                     "original_label",
@@ -745,9 +886,11 @@ class RecognitionPage(QWidget):
         self.add_label_button.setEnabled(True)
         self.delete_label_button.setEnabled(True)
         self.review_table.setEnabled(True)
+        self.figure_mapping_line.setEnabled(True)
 
         if self.all_results:
             self.show_original_image(0)
+            self._publish_reviewed_ocr_results()
 
         QMessageBox.information(
             self,
@@ -763,6 +906,7 @@ class RecognitionPage(QWidget):
 
         self.run_button.setEnabled(True)
         self.review_table.setEnabled(True)
+        self.figure_mapping_line.setEnabled(bool(self.image_paths))
 
     def reset_review_state(self):
         self.all_results = []
@@ -785,6 +929,8 @@ class RecognitionPage(QWidget):
         self.export_review_button.setEnabled(False)
         self.add_label_button.setEnabled(False)
         self.delete_label_button.setEnabled(False)
+        if self.workflow_context is not None:
+            self.workflow_context.clear_ocr_results()
 
     def populate_review_table(self):
         self._updating_review_table = True
@@ -997,6 +1143,7 @@ class RecognitionPage(QWidget):
             result["review_deleted"] = deepcopy(
                 self.deleted_review_entries.get(image_index, [])
             )
+            self._set_result_figure_mapping(result, image_index)
 
         return reviewed_results
 
@@ -1048,6 +1195,7 @@ class RecognitionPage(QWidget):
         self.apply_review_row_style(item.row())
         self.refresh_detection_summary()
         self.show_original_image(self.current_preview_index)
+        self._publish_reviewed_ocr_results()
 
     def add_manual_label(self):
         if not self.all_results:
@@ -1078,6 +1226,7 @@ class RecognitionPage(QWidget):
             QMessageBox.information(self, "尚未選取", "請先選取要刪除的標號列。")
             return
 
+        next_row = min(rows)
         self._updating_review_table = True
         for row in rows:
             label_item = self.review_table.item(row, LABEL_COLUMN)
@@ -1097,8 +1246,14 @@ class RecognitionPage(QWidget):
                     )
             self.review_table.removeRow(row)
         self._updating_review_table = False
+        if self.review_table.rowCount():
+            next_row = min(next_row, self.review_table.rowCount() - 1)
+            self.review_table.clearSelection()
+            self.review_table.setCurrentCell(next_row, LABEL_COLUMN)
+            self.review_table.selectRow(next_row)
         self.refresh_detection_summary()
         self.show_original_image(self.current_preview_index)
+        self._publish_reviewed_ocr_results()
 
     def on_confidence_threshold_changed(self, _value):
         for row in range(self.review_table.rowCount()):
@@ -1192,12 +1347,21 @@ class RecognitionPage(QWidget):
         except Exception as error:
             QMessageBox.critical(self, "匯出錯誤回報失敗", str(error))
 
-    def draw_low_confidence_boxes(self, pixmap, image_index):
+    def draw_low_confidence_boxes(
+        self,
+        pixmap,
+        image_index,
+        coordinate_scale_x=1.0,
+        coordinate_scale_y=None,
+    ):
         if not self.all_results or pixmap.isNull():
             return pixmap
         reviewed_results = self.collect_reviewed_results()
         if image_index >= len(reviewed_results):
             return pixmap
+
+        if coordinate_scale_y is None:
+            coordinate_scale_y = coordinate_scale_x
 
         threshold = self.confidence_threshold.value()
         show_all_boxes = self.show_all_boxes_button.isChecked()
@@ -1219,10 +1383,10 @@ class RecognitionPage(QWidget):
             if not low_confidence and not show_all_boxes:
                 continue
             try:
-                x1 = int(detection["x1"])
-                y1 = int(detection["y1"])
-                x2 = int(detection["x2"])
-                y2 = int(detection["y2"])
+                x1 = round(float(detection["x1"]) * coordinate_scale_x)
+                y1 = round(float(detection["y1"]) * coordinate_scale_y)
+                x2 = round(float(detection["x2"]) * coordinate_scale_x)
+                y2 = round(float(detection["y2"]) * coordinate_scale_y)
             except (KeyError, TypeError, ValueError):
                 continue
             if selected:
@@ -1248,20 +1412,29 @@ class RecognitionPage(QWidget):
 
         index = max(0, min(index, len(self.image_paths) - 1))
         self.current_preview_index = index
+        self._sync_figure_mapping_control(index)
         if self._result_view_current_only and self.all_results:
             self.refresh_result_display()
 
         image_path = self.image_paths[index]
+        preview_key = (index, str(image_path))
+        image_changed = preview_key != self._preview_image_key
 
         pixmap = QPixmap(image_path)
 
         if pixmap.isNull():
+            self.current_pixmap = None
+            self._preview_image_key = None
+            self.image_preview.clear()
             self.image_preview.setText("圖片讀取失敗")
             return
 
-        pixmap = self.draw_low_confidence_boxes(pixmap, index)
-
+        # Keep the full-resolution source untouched.  Every zoom level is
+        # rendered again from this pixmap instead of enlarging a prior preview.
         self.current_pixmap = pixmap
+        self._preview_image_key = preview_key
+        if image_changed:
+            self.preview_zoom_factor = 1.0
         self.update_scaled_preview()
 
         if self.all_results and index < len(self.all_results):
@@ -1275,7 +1448,7 @@ class RecognitionPage(QWidget):
             )
 
     def update_scaled_preview(self):
-        if self.current_pixmap is None:
+        if self.current_pixmap is None or self.current_pixmap.isNull():
             return
 
         viewport_size = self.scroll_area.viewport().size()
@@ -1289,12 +1462,15 @@ class RecognitionPage(QWidget):
         if pix_w <= 0 or pix_h <= 0:
             return
 
-        scale = min(
+        fit_scale = min(
             available_w / pix_w,
             available_h / pix_h
         )
 
-        scale = min(scale, MAX_IMAGE_PREVIEW_ZOOM)
+        # Do not enlarge a small source merely to fill the panel.  User zoom is
+        # separate and explicit, while the initial view stays sharp.
+        self._preview_fit_scale = min(fit_scale, 1.0)
+        scale = self._preview_fit_scale * self.preview_zoom_factor
 
         scaled_w = max(1, int(pix_w * scale))
         scaled_h = max(1, int(pix_h * scale))
@@ -1306,7 +1482,54 @@ class RecognitionPage(QWidget):
             Qt.SmoothTransformation
         )
 
+        # Paint the boxes after scaling so their lines and confidence labels
+        # remain crisp at every zoom level.
+        scaled = self.draw_low_confidence_boxes(
+            scaled,
+            self.current_preview_index,
+            coordinate_scale_x=scaled.width() / pix_w,
+            coordinate_scale_y=scaled.height() / pix_h,
+        )
         self.image_preview.setPixmap(scaled)
+        self.image_preview.resize(scaled.size())
+        if abs(self.preview_zoom_factor - 1.0) < 0.01:
+            zoom_text = "適合視窗"
+        else:
+            zoom_text = f"{round(self.preview_zoom_factor * 100)}%"
+        self.preview_zoom_status.setText(f"滾輪縮放：{zoom_text}")
+
+    def zoom_preview_at(self, steps, viewport_position):
+        """Zoom around the pixel currently beneath the mouse cursor."""
+
+        if self.current_pixmap is None or self.current_pixmap.isNull():
+            return
+
+        old_width = max(1, self.image_preview.width())
+        old_height = max(1, self.image_preview.height())
+        local_anchor = self.image_preview.mapFrom(
+            self.scroll_area.viewport(),
+            viewport_position,
+        )
+        anchor_x = min(1.0, max(0.0, local_anchor.x() / old_width))
+        anchor_y = min(1.0, max(0.0, local_anchor.y() / old_height))
+
+        new_zoom = self.preview_zoom_factor * (1.18 ** float(steps))
+        new_zoom = min(MAX_IMAGE_PREVIEW_ZOOM, max(0.25, new_zoom))
+        if abs(new_zoom - self.preview_zoom_factor) < 0.0001:
+            return
+
+        self.preview_zoom_factor = new_zoom
+        self.update_scaled_preview()
+
+        # Keep the same source-image point beneath the cursor after resizing.
+        horizontal_bar = self.scroll_area.horizontalScrollBar()
+        vertical_bar = self.scroll_area.verticalScrollBar()
+        horizontal_bar.setValue(
+            round(anchor_x * self.image_preview.width() - viewport_position.x())
+        )
+        vertical_bar.setValue(
+            round(anchor_y * self.image_preview.height() - viewport_position.y())
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
