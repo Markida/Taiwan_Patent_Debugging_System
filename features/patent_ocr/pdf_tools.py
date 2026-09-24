@@ -1,14 +1,15 @@
 from pathlib import Path
-import pymupdf
 
 from app.paths import get_output_base_dir
 
 
-def convert_pdf_to_images(pdf_path, output_root=None, dpi=300):
+def convert_pdf_to_images(pdf_path, output_root=None, dpi=300, *, cancel_event=None):
     """
     將 PDF 每一頁轉成 PNG 圖片。
     回傳轉出的圖片路徑 list。
     """
+
+    import pymupdf
 
     pdf_path = Path(pdf_path)
 
@@ -25,28 +26,22 @@ def convert_pdf_to_images(pdf_path, output_root=None, dpi=300):
     image_paths = []
 
     try:
-        doc = pymupdf.open(str(pdf_path))
+        with pymupdf.open(str(pdf_path)) as doc:
+            if len(doc) == 0:
+                raise ValueError("PDF 頁數為 0，無法轉換。")
 
-        if len(doc) == 0:
-            doc.close()
-            raise ValueError("PDF 頁數為 0，無法轉換。")
-
-        for page_index in range(len(doc)):
-            page = doc[page_index]
-
-            pix = page.get_pixmap(dpi=dpi, alpha=False)
-
-            output_path = output_dir / f"{pdf_path.stem}_page_{page_index + 1:03d}.png"
-            pix.save(str(output_path))
-
-            if not output_path.exists():
-                raise RuntimeError(
-                    f"PDF 第 {page_index + 1} 頁轉圖失敗：{output_path}"
-                )
-
-            image_paths.append(str(output_path))
-
-        doc.close()
+            for page_index in range(len(doc)):
+                if cancel_event is not None and cancel_event.is_set():
+                    return []
+                page = doc[page_index]
+                pix = page.get_pixmap(dpi=dpi, alpha=False)
+                output_path = output_dir / f"{pdf_path.stem}_page_{page_index + 1:03d}.png"
+                pix.save(str(output_path))
+                if not output_path.exists():
+                    raise RuntimeError(
+                        f"PDF 第 {page_index + 1} 頁轉圖失敗：{output_path}"
+                    )
+                image_paths.append(str(output_path))
 
     except Exception as e:
         raise RuntimeError(

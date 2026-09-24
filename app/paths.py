@@ -1,5 +1,12 @@
+import os
 import sys
 from pathlib import Path
+
+
+def get_app_icon_path():
+    """Return the bundled cross-platform application icon."""
+
+    return Path(__file__).resolve().parent / "resources" / "app_icon.png"
 
 
 def get_app_base_dir():
@@ -19,13 +26,48 @@ def get_app_base_dir():
     return Path(__file__).resolve().parent.parent
 
 
+def get_app_install_dir():
+    """Return the portable product root (the folder containing the launcher)."""
+
+    base_dir = get_app_base_dir()
+    if base_dir.name.lower() == "app":
+        parent = base_dir.parent
+        launcher_names = (
+            "Saint-Island_Patent_MDS.exe",
+            "Saint-IslandPatentOCR.exe",
+            "SantoPatentOCR.exe",
+        )
+        if (parent / "runtime").is_dir() or any(
+            (parent / name).is_file() for name in launcher_names
+        ):
+            return parent
+    return base_dir
+
+
+def get_user_data_dir():
+    """Return this Windows user's machine-local application data folder."""
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    root = (
+        Path(local_app_data)
+        if local_app_data
+        else Path.home() / "AppData" / "Local"
+    )
+    return root / "Saint-Island_Patent_MDS"
+
+
 def get_output_base_dir():
     """
     輸出資料夾固定放到使用者 Documents。
     避免安裝後寫入 Program Files 或 .dist 資料夾造成權限問題。
     """
 
-    output_dir = Path.home() / "Documents" / "SantoPatentOCR" / "outputs"
+    output_dir = (
+        Path.home()
+        / "Documents"
+        / "Saint-Island_Patent_MDS"
+        / "outputs"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 

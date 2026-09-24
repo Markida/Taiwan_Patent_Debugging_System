@@ -11,6 +11,24 @@ dist/
 *.onefile-build/
 build_debug_cpu/
 build_release_cpu/
+build_offline_cpu/
+build_offline_cpu_ts/
+build_offline_cpu_min/
+build_offline_cpu_final/
+release/
+.nuitka_cache/
+
+# Local v3 GPU training environment and generated artifacts
+.venv_train_v3/
+.ultralytics_train_v3/
+.matplotlib_train_v3/
+training/v3/work/
+training/v3/smoke_output/
+training/v3/smoke_manual/
+training/v3/preflight_report.json
+training/char_yolo/dataset_v3_consensus/
+training/char_yolo/dataset_v3_smoke/
+runs/v3/
 
 # Nuitka output
 *.dist/
@@ -19,6 +37,11 @@ build_release_cpu/
 
 # Output files
 outputs/
+output/
+custom_text_rules.json
+custom_text_rules.json.tmp
+app/features/snake/snake_scores.json
+app/features/snake/snake_scores.json.tmp
 pdf_pages/
 rotated_images/
 result_txt/
@@ -33,11 +56,27 @@ training/manual_annotation/locator_dataset_v3_rotated/
 training/manual_annotation/group_locator_dataset_v1/
 training/manual_annotation/group_locator_dataset_v2/
 Ultralytics/
+runs/
+tmp/
+
+# Generated domain datasets and collected patent source material
+training/char_yolo/dataset_v2_domain_matched/
+training/char_yolo/dataset_v4_company_approved/
+training/data_collection/saint_island_latest_*/
+training/v3/manual_review/
+training/v4_company_approved/manual_review/
+training/v4_company_approved/work/
+training/v4_company_approved/manual_review_contact_sheet.png
+training/v4_company_approved/manual_review_qa.json
 
 # Large model files
 models/*.pt
+*.pt
+models/*.torchscript
+models/*.onnx
 easyocr_models/*.pth
 models/locator_v*.json
+models/pretrained/
 
 # Test / local files
 sample/output/
@@ -48,3 +87,33 @@ sample/output/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local verification, deliverables and application state (never publish)
+.qa/
+deliverables/
+research/
+data/
+**/chat_profile.json
+**/chat_profile.json.tmp
+**/chat_avatar_*
+**/snake_scores.json
+**/snake_scores.json.tmp
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Keep training utilities, not collected documents, labels or dataset reports.
+training/gold_validation_v1/
+training/figure_heading/*/
+training/figure_heading/*.json
+training/first_stage/*/
+training/second_stage/*/
+models/gold_*.json
+models/sealed_holdout*.json
+models/patent_label_group_v2_gold_ft_metrics.json
+models/*.experimental.json
+easyocr_models/*_metrics.json
+# Generated converter output; retain only the synthetic input fixture.
+tests/fixtures/*-北京泰吉.docx

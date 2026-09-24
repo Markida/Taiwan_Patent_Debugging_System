@@ -1,4 +1,11 @@
 import re
+import unicodedata
+
+
+_STANDARD_LABEL = re.compile(r"^[0-9A-Za-z]+(?:')?$")
+_REFERENCE_SPECIAL_LABEL = re.compile(
+    r"^[^\s:：.．,，、~～\-()（）]+$"
+)
 
 
 def normalize_label_text(label_text):
@@ -20,24 +27,42 @@ def normalize_label_text(label_text):
     text = text.replace("`", "'")
 
     text = re.sub(r"[^0-9A-Za-z']", "", text)
-    text = text.upper()
 
-    # Prime is a suffix in the supported patent-label grammar (for example
-    # 7' or 55'). OCR marks at the beginning or after a letter are drawing
-    # noise, not valid labels.
-    has_numeric_prime_suffix = (
+    # Prime is a suffix of any supported alphanumeric patent label. Real
+    # symbol lists can contain 3', A', S1' and lowercase equivalents.
+    # A leading or embedded mark is still treated as drawing noise.
+    has_alphanumeric_prime_suffix = (
         text.endswith("'")
         and len(text) >= 2
-        and text.rstrip("'")[-1:].isdigit()
+        and text[:-1].isalnum()
     )
     text = text.replace("'", "")
-    if has_numeric_prime_suffix:
+    if has_alphanumeric_prime_suffix:
         text += "'"
 
     if text.isdigit():
         text = text.lstrip("0") or "0"
 
     return text
+
+
+def normalize_reference_label_text(label_text):
+    """Normalize document-list labels while preserving literal symbols."""
+
+    text = re.sub(
+        r"\s+",
+        "",
+        unicodedata.normalize("NFKC", str(label_text).strip()),
+    )
+    text = text.replace("’", "'").replace("′", "'").replace("＇", "'")
+    if _STANDARD_LABEL.fullmatch(text):
+        return normalize_label_text(text)
+    if (
+        _REFERENCE_SPECIAL_LABEL.fullmatch(text)
+        and re.search(r"[\u3400-\u9fff]", text) is None
+    ):
+        return text
+    return ""
 
 
 def parse_reference_items(input_text):
@@ -61,7 +86,7 @@ def parse_reference_items(input_text):
             continue
 
         match = re.match(
-            r"^\s*([0-9A-Za-z]+(?:['’′])?)\s*[:：]\s*(.*?)\s*$",
+            r"^\s*([^\s:：.．,，、~～\-()（）]+)\s*[:：]\s*(.*?)\s*$",
             line
         )
 
@@ -80,7 +105,7 @@ def parse_reference_items(input_text):
         if not match:
             continue
 
-        label = normalize_label_text(match.group(1))
+        label = normalize_reference_label_text(match.group(1))
 
         if not label:
             continue

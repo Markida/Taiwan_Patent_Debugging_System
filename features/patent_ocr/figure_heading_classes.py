@@ -1,0 +1,15 @@
+"""Shared class contract for the dedicated figure-heading detector."""
+
+FIGURE_PREFIX_CLASS = "figure_prefix"
+FIGURE_IDENTIFIER_CLASS = "figure_identifier"
+FIGURE_PREFIX_ROTATE_RIGHT_CLASS = "figure_prefix_rotate_right"
+
+FIGURE_HEADING_CLASS_NAMES = (
+    FIGURE_PREFIX_CLASS,
+    FIGURE_IDENTIFIER_CLASS,
+    FIGURE_PREFIX_ROTATE_RIGHT_CLASS,
+)
+FIGURE_PREFIX_CLASS_NAMES = (
+    FIGURE_PREFIX_CLASS,
+    FIGURE_PREFIX_ROTATE_RIGHT_CLASS,
+)

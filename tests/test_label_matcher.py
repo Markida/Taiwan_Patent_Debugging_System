@@ -1,9 +1,6 @@
 import unittest
 
-from features.patent_ocr.label_matcher import (
-    IMAGE_RESULT_SEPARATOR,
-    build_reference_comparison_text,
-)
+from features.patent_ocr.label_matcher import build_result_summary_html
 
 
 class LabelMatcherTests(unittest.TestCase):
@@ -13,62 +10,114 @@ class LabelMatcherTests(unittest.TestCase):
             {"number": "2", "name": "第二零件"},
         ]
 
-    def test_lists_labels_found_in_image_but_not_in_checklist(self):
+    def test_global_differences_are_shown_before_image_sections(self):
         results = [
-            {
-                "image_name": "page_1.png",
-                "numbers": ["1", "3", "3", "A"],
-            }
+            {"image_name": "page_1.png", "numbers": ["1", "3", "3"]},
+            {"image_name": "page_2.png", "numbers": ["1", "A"]},
         ]
 
-        text = build_reference_comparison_text(results, self.reference_items)
+        html = build_result_summary_html(results, self.reference_items)
 
-        self.assertIn("有出現的標號：1（第一零件）", text)
-        self.assertIn("未出現的標號：2（第二零件）", text)
-        self.assertIn(
-            "圖片中有出現，但是清單裡沒有出現的標號：3, A",
-            text,
+        self.assertIn("標號清單有，但全部圖片都沒有出現：2", html)
+        self.assertIn("有任意一張圖片出現，但標號清單沒有輸入：3, A", html)
+        self.assertIn("<strong>All Pictures</strong>", html)
+        self.assertLess(html.index("All Pictures"), html.index("page_1.png"))
+
+    def test_single_picture_mode_omits_all_pictures_summary(self):
+        html = build_result_summary_html(
+            [{"image_name": "Pic_02", "numbers": ["2"]}],
+            [{"number": "1"}, {"number": "2"}],
+            include_global_summary=False,
         )
 
-    def test_shows_none_when_image_has_no_unlisted_labels(self):
-        results = [
-            {
-                "image_name": "page_1.png",
-                "numbers": ["1", "2"],
-            }
-        ]
+        self.assertNotIn("All Pictures", html)
+        self.assertIn("<strong>Pic_02</strong>", html)
+        self.assertIn("標號清單有，圖片沒有：1", html)
 
-        text = build_reference_comparison_text(results, self.reference_items)
-
-        self.assertIn(
-            "圖片中有出現，但是清單裡沒有出現的標號：無",
-            text,
-        )
-
-    def test_unlisted_labels_are_calculated_per_image(self):
+    def test_each_image_only_shows_its_differences(self):
         results = [
             {"image_name": "page_1.png", "numbers": ["1", "8"]},
             {"image_name": "page_2.png", "numbers": ["2", "9"]},
         ]
 
-        text = build_reference_comparison_text(results, self.reference_items)
+        html = build_result_summary_html(results, self.reference_items)
 
-        self.assertEqual(
-            text.count("圖片中有出現，但是清單裡沒有出現的標號："),
-            2,
-        )
-        self.assertIn("圖片中有出現，但是清單裡沒有出現的標號：8", text)
-        self.assertIn("圖片中有出現，但是清單裡沒有出現的標號：9", text)
-        self.assertEqual(text.count(IMAGE_RESULT_SEPARATOR), 1)
+        self.assertIn("<strong>page_1.png</strong>", html)
+        self.assertIn("<strong>page_2.png</strong>", html)
+        self.assertIn("標號清單有，圖片沒有：2", html)
+        self.assertIn("圖片有，標號清單沒有：8", html)
+        self.assertIn("標號清單有，圖片沒有：1", html)
+        self.assertIn("圖片有，標號清單沒有：9", html)
+        self.assertNotIn("輸入標號數量", html)
+        self.assertNotIn("有出現的標號", html)
 
-    def test_single_image_does_not_add_separator(self):
+    def test_no_reference_list_only_shows_detected_labels_per_image(self):
         results = [
-            {"image_name": "page_1.png", "numbers": ["1"]},
+            {"image_name": "page_1.png", "numbers": ["1", "A", "A"]},
+            {"image_name": "page_2.png", "numbers": []},
         ]
 
-        text = build_reference_comparison_text(results, self.reference_items)
+        html = build_result_summary_html(results, [])
 
-        self.assertNotIn(IMAGE_RESULT_SEPARATOR, text)
+        self.assertIn("<strong>page_1.png</strong>", html)
+        self.assertIn("偵測到的標號：1, A", html)
+        self.assertIn("<strong>page_2.png</strong>", html)
+        self.assertIn("偵測到的標號：無", html)
+        self.assertNotIn("All Pictures", html)
+        self.assertNotIn("標號清單有", html)
+
+    def test_image_names_are_html_escaped(self):
+        html = build_result_summary_html(
+            [{"image_name": "page<1>&.png", "numbers": ["1"]}],
+            [],
+        )
+
+        self.assertIn("<strong>page&lt;1&gt;&amp;.png</strong>", html)
+
+    def test_optional_sort_compares_each_character_from_left_to_right(self):
+        results = [{
+            "image_name": "Pic_01",
+            "numbers": ["34", "3", "121", "21", "1", "33", "131", "2"],
+        }]
+
+        original_html = build_result_summary_html(results, [])
+        sorted_html = build_result_summary_html(
+            results,
+            [],
+            sort_numbers=True,
+        )
+
+        self.assertIn(
+            "偵測到的標號：34, 3, 121, 21, 1, 33, 131, 2",
+            original_html,
+        )
+        self.assertIn(
+            "偵測到的標號：1, 121, 131, 2, 21, 3, 33, 34",
+            sorted_html,
+        )
+
+    def test_optional_sort_supports_letters_and_prime_after_digits(self):
+        html = build_result_summary_html(
+            [{
+                "image_name": "Pic_01",
+                "numbers": ["A", "7'", "70", "7", "10A", "10"],
+            }],
+            [],
+            sort_numbers=True,
+        )
+
+        self.assertIn(
+            "偵測到的標號：10, 10A, 7, 70, 7&#x27;, A",
+            html,
+        )
+
+    def test_comparison_keeps_uppercase_and_lowercase_distinct(self):
+        html = build_result_summary_html(
+            [{"image_name": "Pic_01", "numbers": ["A", "a"]}],
+            [{"number": "A"}],
+        )
+
+        self.assertIn("圖片有，標號清單沒有：a", html)
 
 
 if __name__ == "__main__":

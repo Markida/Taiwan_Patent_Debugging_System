@@ -24,7 +24,8 @@ class ManualAnnotationCommonTests(unittest.TestCase):
     def test_normalizes_prime_and_letters(self):
         self.assertEqual(normalize_label("′"), "prime")
         self.assertEqual(normalize_label("'"), "prime")
-        self.assertEqual(normalize_label("v"), "V")
+        self.assertEqual(normalize_label("v"), "v")
+        self.assertEqual(normalize_label("V"), "V")
         self.assertEqual(normalize_label("VIII"), "")
 
     def test_yolo_round_trip_preserves_box(self):

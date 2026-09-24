@@ -1,5 +1,12 @@
 # 模型說明
 
+## 目前版本（2026-09-24）
+
+- v2.2.07 預設使用 `patent_label_group_v2_gold_ft.onnx`，找出完整標號後交由離線 `english_g2.pth` 辨識。
+- 圖題方向模型 `figure_heading_pilot_v1.onnx` 是獨立試用模型；需配套 names 與 experimental manifest 通過雜湊檢查，才可由第一步自動旋轉啟用。不是正式發布模型。
+- 模型權重、個別案件評估及資料集專用 manifest 不放入公開 Git；公司端模型由更新包另外提供。
+- 以下 v1／v2 數據與建議為歷史紀錄，當前預設與門檻以 `app/config.py`、`ui/recognition_page.py` 為準。
+
 ```text
 best.pt            原始單一 class 字元定位器；定位後交給 EasyOCR 辨識字元。
 best_v2.pt         使用人工清理後的真實專利圖資料微調；保留作為舊版逐字元流程。

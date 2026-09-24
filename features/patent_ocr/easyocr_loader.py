@@ -1,8 +1,17 @@
+from functools import lru_cache
 from pathlib import Path
 
-import easyocr
-
 from app.paths import get_easyocr_model_dir
+from features.patent_ocr.compact_ocr_reader import CompactEnglishReader
+
+
+@lru_cache(maxsize=2)
+def _create_easyocr_reader_cached(model_path_text, modified_ns, size_bytes, ocr_gpu):
+    del modified_ns, size_bytes
+    return CompactEnglishReader(
+        Path(model_path_text),
+        gpu=ocr_gpu,
+    )
 
 
 def create_easyocr_reader(ocr_gpu):
@@ -18,16 +27,11 @@ def create_easyocr_reader(ocr_gpu):
     if not easyocr_model_dir.exists():
         raise RuntimeError(
             f"找不到 EasyOCR 模型資料夾：{easyocr_model_dir}\n\n"
-            f"請確認 SantoPatentOCR.exe 或 main.py 同層資料夾內有 easyocr_models。\n"
-            f"資料夾內至少應包含：\n"
-            f"- craft_mlt_25k.pth\n"
-            f"- english_g2.pth"
+            f"請確認 Saint-Island_Patent_MDS.exe 所在程式資料夾內有 easyocr_models。\n"
+            f"資料夾內至少應包含 english_g2.pth。"
         )
 
-    required_model_files = [
-        "craft_mlt_25k.pth",
-        "english_g2.pth"
-    ]
+    required_model_files = ["english_g2.pth"]
 
     missing_files = [
         file_name
@@ -44,11 +48,17 @@ def create_easyocr_reader(ocr_gpu):
             f"複製缺少的 .pth 檔案到 easyocr_models。"
         )
 
-    reader = easyocr.Reader(
-        ["en"],
-        gpu=ocr_gpu,
-        model_storage_directory=str(easyocr_model_dir),
-        download_enabled=False
+    model_path = (easyocr_model_dir / "english_g2.pth").resolve()
+    stat = model_path.stat()
+    return _create_easyocr_reader_cached(
+        str(model_path),
+        stat.st_mtime_ns,
+        stat.st_size,
+        bool(ocr_gpu),
     )
 
-    return reader
+
+def clear_easyocr_reader_cache():
+    """Release the recognizer cache for tests or explicit maintenance."""
+
+    _create_easyocr_reader_cached.cache_clear()
