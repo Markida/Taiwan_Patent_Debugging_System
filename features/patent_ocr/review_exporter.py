@@ -11,11 +11,8 @@ from pathlib import Path
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
-import cv2
-
 from app.config import REVIEW_REPORT_NETWORK_DIR
 from app.paths import get_output_base_dir
-from features.patent_ocr.image_io import read_image
 from features.patent_ocr.review_tools import detection_confidence
 
 
@@ -59,6 +56,8 @@ def _try_unlink(path):
 
 
 def _encoded_png(image):
+    import cv2
+
     success, encoded = cv2.imencode(".png", image)
     if not success:
         raise RuntimeError("無法編碼回報圖片。")
@@ -145,6 +144,8 @@ def _create_review_archive(results, confidence_threshold, output_path, created_a
                     result.get("image_name") or f"Pic_{image_index:02d}"
                 )
                 image_path = Path(result.get("image_path", ""))
+                from features.patent_ocr.image_io import read_image
+
                 image = read_image(image_path)
                 if image is None:
                     raise RuntimeError(f"匯出時無法讀取圖片：{image_path}")

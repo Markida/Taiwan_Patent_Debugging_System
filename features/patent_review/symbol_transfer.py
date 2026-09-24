@@ -38,7 +38,10 @@ _PREFIX_NUMERIC_RANGE = re.compile(
     r"^(?P<prefix>[A-Za-z]+)(?P<start>\d+)\s*(?:-|~|～|至)\s*"
     r"(?:(?P<end_prefix>[A-Za-z]+))?(?P<end>\d+)$"
 )
-_PRIMES = "'’′＇"
+_REPRESENTATIVE_FIGURE = re.compile(
+    r"圖\s*0*(?P<number>[1-9]\d*)(?P<suffix>[A-Za-z]?)",
+    re.IGNORECASE,
+)
 _NON_SYMBOL_SEPARATORS = {
     "新型專利說明書",
     "發明專利說明書",
@@ -101,13 +104,14 @@ class DocumentSymbolTransfer:
     file_name: str
     source_sha256: str
     patent_title: str
+    representative_figure_number: str = ""
     full_entries: List[PatentSymbolEntry] = field(default_factory=list)
     representative_entries: List[PatentSymbolEntry] = field(default_factory=list)
     warnings: List[SymbolTransferWarning] = field(default_factory=list)
     source_review_issue_ids: Dict[str, List[str]] = field(default_factory=dict)
     manual_override_sources: List[str] = field(default_factory=list)
     generated_at_utc: str = ""
-    schema_version: str = "3.1"
+    schema_version: str = "3.2"
 
     @property
     def entries(self) -> List[PatentSymbolEntry]:
@@ -210,8 +214,6 @@ def _normalize_direct_label(raw_token: str) -> Optional[str]:
         "",
         unicodedata.normalize("NFKC", raw_token),
     )
-    if compact[-1:] in _PRIMES and compact[-2:-1] and not compact[-2:-1].isdigit():
-        return None
     return normalize_reference_label_text(compact) or None
 
 
@@ -382,6 +384,23 @@ def extract_document_symbols(
     review: Optional[PatentTextReview] = None,
 ) -> DocumentSymbolTransfer:
     """Extract complete and representative symbol lists without editing DOCX."""
+
+    representative_figures: List[str] = []
+    for paragraph in document.paragraphs:
+        if paragraph.section_key != "designated_representative_drawing":
+            continue
+        for match in _REPRESENTATIVE_FIGURE.finditer(paragraph.text):
+            number = str(int(match.group("number")))
+            suffix = (match.group("suffix") or "").upper()
+            identifier = f"{number}{suffix}"
+            if identifier not in representative_figures:
+                representative_figures.append(identifier)
+    # The document rule engine separately reports an ambiguous/missing
+    # designation. Only publish a jump target when the source contains one
+    # unambiguous representative figure.
+    representative_figure_number = (
+        representative_figures[0] if len(representative_figures) == 1 else ""
+    )
 
     entries_by_source: Dict[str, List[PatentSymbolEntry]] = {
         source: [] for source in SECTION_FOR_SOURCE
@@ -580,6 +599,7 @@ def extract_document_symbols(
         file_name=document.file_name,
         source_sha256=document.sha256,
         patent_title=document.patent_title,
+        representative_figure_number=representative_figure_number,
         full_entries=entries_by_source[FULL_SYMBOL_SOURCE],
         representative_entries=entries_by_source[REPRESENTATIVE_SYMBOL_SOURCE],
         warnings=warnings,
@@ -698,6 +718,7 @@ def rebuild_transfer_from_reference_texts(
         file_name=transfer.file_name,
         source_sha256=transfer.source_sha256,
         patent_title=transfer.patent_title,
+        representative_figure_number=transfer.representative_figure_number,
         full_entries=full_entries,
         representative_entries=representative_entries,
         warnings=full_warnings + representative_warnings,

@@ -175,6 +175,7 @@ class PatentTextReview:
     rule_catalog: List[RuleDefinition] = field(default_factory=list)
     parse_warnings: List[str] = field(default_factory=list)
     schema_version: str = "2.0"
+    claim_disclosure_coverage: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)

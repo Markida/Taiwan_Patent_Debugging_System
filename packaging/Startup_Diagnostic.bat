@@ -32,11 +32,7 @@ set "PYTHONUTF8=1"
 set "KMP_DUPLICATE_LIB_OK=TRUE"
 set "OMP_NUM_THREADS=1"
 set "MKL_NUM_THREADS=1"
-if defined LOCALAPPDATA (
-    set "YOLO_CONFIG_DIR=%LOCALAPPDATA%\Saint-IslandPatentOCR"
-) else (
-    set "YOLO_CONFIG_DIR=%TEMP%\Saint-IslandPatentOCR"
-)
+set "YOLO_CONFIG_DIR=%ROOT%data\ultralytics"
 
 if exist "%REPORT%" del /q "%REPORT%"
 pushd "%ROOT%app"

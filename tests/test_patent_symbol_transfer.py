@@ -57,6 +57,38 @@ BASE_LINES = [
 
 
 class PatentSymbolTransferTests(unittest.TestCase):
+    def test_extracts_designated_representative_figure_for_ocr_jump(self):
+        document = build_document([
+            "【中文新型名稱】測試裝置",
+            "【指定代表圖】圖03A",
+            "【符號說明】",
+            "1:底座",
+            "【代表圖之符號簡單說明】",
+            "1:底座",
+        ])
+
+        transfer = extract_document_symbols(document)
+
+        self.assertEqual(transfer.representative_figure_number, "3A")
+        rebuilt = rebuild_transfer_from_reference_texts(
+            transfer,
+            transfer.reference_text,
+            transfer.reference_text_for(REPRESENTATIVE_SYMBOL_SOURCE),
+        )
+        self.assertEqual(rebuilt.representative_figure_number, "3A")
+
+    def test_ambiguous_representative_figure_does_not_publish_jump_target(self):
+        document = build_document([
+            "【中文新型名稱】測試裝置",
+            "【指定代表圖】圖1、圖2",
+            "【符號說明】",
+            "1:底座",
+        ])
+
+        transfer = extract_document_symbols(document)
+
+        self.assertEqual(transfer.representative_figure_number, "")
+
     def test_extracts_full_symbol_list_in_ocr_reference_format(self):
         document = build_document(BASE_LINES)
         transfer = extract_document_symbols(document, review_document(document))
@@ -87,6 +119,23 @@ class PatentSymbolTransferTests(unittest.TestCase):
         self.assertEqual(transfer.reference_items, [{"number": "10", "name": "主箱體"}])
         self.assertFalse(
             any(warning.symbol_source == "full" for warning in transfer.warnings)
+        )
+
+    def test_letter_and_mixed_prime_symbols_are_transferred_to_ocr(self):
+        document = build_document([
+            "【中文新型名稱】測試裝置",
+            "【符號說明】",
+            "A′:大寫元件",
+            "S1':混合元件",
+            "a’:小寫元件",
+        ])
+
+        transfer = extract_document_symbols(document)
+
+        self.assertTrue(transfer.ready_for_ocr)
+        self.assertEqual(
+            [entry.label for entry in transfer.full_entries],
+            ["A'", "S1'", "a'"],
         )
 
     def test_extracts_symbol_and_name_from_adjacent_table_cells(self):

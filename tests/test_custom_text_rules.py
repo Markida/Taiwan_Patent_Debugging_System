@@ -3,11 +3,13 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import time
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
 
 from app.paths import get_app_install_dir
 from features.patent_review.custom_rules import (
@@ -17,6 +19,8 @@ from features.patent_review.custom_rules import (
     CustomRuleValidationError,
     CustomTextRule,
     CustomTextRuleStore,
+    DocumentSimilarityWhitelistStore,
+    SHARED_CUSTOM_TEXT_RULES_DIRECTORY,
 )
 from features.patent_review.models import (
     PatentDocument,
@@ -68,6 +72,62 @@ class CustomTextRuleTests(unittest.TestCase):
             self.assertEqual(rule, duplicate)
             self.assertEqual([item.text for item in reopened_rules], ["的的"])
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["rules"][0]["text"], "的的")
+
+    def test_easter_egg_default_shared_rule_store_uses_legacy_documents_path(self):
+        store = CustomTextRuleStore()
+
+        self.assertEqual(store.path.parent, SHARED_CUSTOM_TEXT_RULES_DIRECTORY)
+        self.assertEqual(store.path.parent, Path(r"C:\Documents"))
+        self.assertEqual(store.path.name, "custom_text_rules.json")
+
+    def test_document_whitelist_is_persistent_and_isolated_by_document(self):
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "document_similarity_whitelists.json"
+            store = DocumentSimilarityWhitelistStore(path)
+            first = build_document()
+            second = build_document()
+            second.source_path = "another.docx"
+            second.file_name = "another.docx"
+            second.sha256 = "f" * 64
+
+            term, created = store.add(first, "第一位置")
+            duplicate, duplicate_created = store.add(first, "第一位置")
+
+            self.assertEqual(term, "第一位置")
+            self.assertEqual(duplicate, term)
+            self.assertTrue(created)
+            self.assertFalse(duplicate_created)
+            self.assertEqual(store.load(first), ["第一位置"])
+            self.assertEqual(store.load(second), [])
+
+            # Editing and reparsing the same source path keeps its document-
+            # specific list even though the file hash changes.
+            first.sha256 = "1" * 64
+            self.assertEqual(store.load(first), ["第一位置"])
+            self.assertEqual(store.remove(first, ["第一位置"]), 1)
+            self.assertEqual(store.load(first), [])
+
+    def test_default_document_whitelist_is_local_to_each_windows_user(self):
+        document = build_document()
+        with TemporaryDirectory() as first_profile, TemporaryDirectory() as second_profile:
+            with patch.dict(os.environ, {"LOCALAPPDATA": first_profile}):
+                first_store = DocumentSimilarityWhitelistStore()
+                first_store.add(document, "第一位置")
+                self.assertEqual(
+                    first_store.path,
+                    Path(first_profile)
+                    / "Saint-Island_Patent_MDS"
+                    / "document_similarity_whitelists.json",
+                )
+                self.assertEqual(
+                    DocumentSimilarityWhitelistStore().load(document),
+                    ["第一位置"],
+                )
+
+            with patch.dict(os.environ, {"LOCALAPPDATA": second_profile}):
+                second_store = DocumentSimilarityWhitelistStore()
+                self.assertNotEqual(second_store.path, first_store.path)
+                self.assertEqual(second_store.load(document), [])
 
     def test_version_one_file_is_loaded_as_blacklist(self):
         with TemporaryDirectory() as temporary_directory:
@@ -132,6 +192,9 @@ class CustomTextRuleTests(unittest.TestCase):
                 store.load()
 
             page = PatentReviewPage(lambda: None, custom_rule_store=store)
+            deadline = time.monotonic() + 5
+            while not page.custom_rule_load_error and time.monotonic() < deadline:
+                QTest.qWait(5)
             self.assertEqual(page.custom_rules, [])
             self.assertTrue(page.custom_rule_load_error)
             page.deleteLater()
@@ -169,7 +232,9 @@ class CustomTextRuleTests(unittest.TestCase):
             store.add("個個")
 
             page = PatentReviewPage(lambda: None, custom_rule_store=store)
-
+            deadline = time.monotonic() + 5
+            while not page.custom_rules and time.monotonic() < deadline:
+                QTest.qWait(5)
             self.assertEqual([rule.text for rule in page.custom_rules], ["個個"])
             self.assertIn("（1）", page.custom_rules_button.text())
             page.deleteLater()
@@ -180,14 +245,17 @@ class CustomTextRuleTests(unittest.TestCase):
                 Path(temporary_directory) / "custom_text_rules.json"
             )
             dialog = CustomTextRuleDialog(store)
+            self.wait_for_dialog(dialog)
             dialog.rule_input.setText("的的")
 
             self.assertTrue(dialog.add_current_rule())
+            self.wait_for_dialog(dialog)
             self.assertTrue(dialog.rules_changed)
             self.assertEqual(dialog.rule_table.rowCount(), 1)
 
             dialog.rule_table.selectRow(0)
             self.assertEqual(dialog.delete_selected_rules(), 1)
+            self.wait_for_dialog(dialog)
             self.assertEqual(store.load(), [])
             dialog.deleteLater()
 
@@ -197,11 +265,13 @@ class CustomTextRuleTests(unittest.TestCase):
                 Path(temporary_directory) / "custom_text_rules.json"
             )
             dialog = CustomTextRuleDialog(store)
+            self.wait_for_dialog(dialog)
             white_input = dialog._inputs[CUSTOM_RULE_WHITELIST]
             white_table = dialog._tables[CUSTOM_RULE_WHITELIST]
             white_input.setText("第一尺輪")
 
             self.assertTrue(dialog.add_current_rule(CUSTOM_RULE_WHITELIST))
+            self.wait_for_dialog(dialog)
             self.assertEqual(dialog.rule_table.rowCount(), 0)
             self.assertEqual(white_table.rowCount(), 1)
             self.assertEqual(store.load()[0].rule_type, CUSTOM_RULE_WHITELIST)
@@ -211,7 +281,14 @@ class CustomTextRuleTests(unittest.TestCase):
                 dialog.delete_selected_rules(CUSTOM_RULE_WHITELIST),
                 1,
             )
+            self.wait_for_dialog(dialog)
             dialog.deleteLater()
+
+    def wait_for_dialog(self, dialog):
+        deadline = time.monotonic() + 5
+        while dialog._tasks.busy and time.monotonic() < deadline:
+            QTest.qWait(5)
+        self.assertFalse(dialog._tasks.busy)
 
 
 if __name__ == "__main__":

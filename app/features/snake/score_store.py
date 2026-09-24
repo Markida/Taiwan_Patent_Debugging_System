@@ -5,14 +5,18 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import unicodedata
 from typing import Iterable, List, Optional
-
-from app.paths import get_app_install_dir
-
+from uuid import uuid4
+from app.features.chat_room.game_ranking import normalize_computer_name
 
 SNAKE_SCORE_FILENAME = "snake_scores.json"
+SNAKE_ROOT_ENVIRONMENT_VARIABLE = "SAINT_ISLAND_SNAKE_ROOT"
+DEFAULT_COMPANY_SNAKE_ROOT = Path(
+    r"\\CPC2856\Documents\app\features\snake"
+)
 SNAKE_SCORE_SCHEMA_VERSION = 1
 MAX_PLAYER_NAME_LENGTH = 20
 MAX_STORED_SCORES = 100
@@ -26,16 +30,13 @@ class SnakeScoreStorageError(SnakeScoreError):
     """Raised when scores cannot be read or written."""
 
 
+def default_snake_score_root() -> Path:
+    override = os.environ.get(SNAKE_ROOT_ENVIRONMENT_VARIABLE, "").strip()
+    return Path(override) if override else DEFAULT_COMPANY_SNAKE_ROOT
+
+
 def default_snake_score_path() -> Path:
-    # Deliberately kept out of ordinary output/config locations.  This exact
-    # nested path is also copied unchanged into portable company installations.
-    return (
-        get_app_install_dir()
-        / "app"
-        / "features"
-        / "snake"
-        / SNAKE_SCORE_FILENAME
-    )
+    return default_snake_score_root() / SNAKE_SCORE_FILENAME
 
 
 def normalize_player_name(value: object) -> str:
@@ -56,6 +57,11 @@ class SnakeScoreEntry:
     name: str
     score: int
     recorded_at_utc: str
+    computer_name: str = ""
+
+    @property
+    def display_name(self):
+        return self.computer_name or "未識別電腦"
 
 
 class SnakeScoreStore:
@@ -63,9 +69,9 @@ class SnakeScoreStore:
         self.path = Path(path or default_snake_score_path())
 
     def load(self) -> List[SnakeScoreEntry]:
-        if not self.path.exists():
-            return []
         try:
+            if not self.path.exists():
+                return []
             payload = json.loads(self.path.read_text(encoding="utf-8-sig"))
             if not isinstance(payload, dict):
                 raise TypeError("score file root must be an object")
@@ -76,10 +82,10 @@ class SnakeScoreStore:
             for raw in raw_scores:
                 if not isinstance(raw, dict):
                     raise TypeError("each score must be an object")
-                name = normalize_player_name(raw.get("name", ""))
+                name = normalize_computer_name(raw.get("computer_name")) or normalize_player_name(raw.get("name", ""))
                 score = max(0, int(raw.get("score", 0)))
                 recorded_at = str(raw.get("recorded_at_utc", ""))
-                entries.append(SnakeScoreEntry(name, score, recorded_at))
+                entries.append(SnakeScoreEntry(name, score, recorded_at, normalize_computer_name(raw.get("computer_name"))))
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as error:
             raise SnakeScoreStorageError(
                 f"無法讀取貪食蛇排行榜：{self.path}\n{error}"
@@ -92,7 +98,12 @@ class SnakeScoreStore:
             "schema_version": SNAKE_SCORE_SCHEMA_VERSION,
             "scores": [asdict(entry) for entry in normalized],
         }
-        temporary_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        # Several company computers can update the shared leaderboard at the
+        # same time.  A unique temporary filename prevents their atomic writes
+        # from clobbering one another before replacement.
+        temporary_path = self.path.parent / (
+            f".{self.path.name}.{uuid4().hex}.tmp"
+        )
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path.write_text(
@@ -109,8 +120,8 @@ class SnakeScoreStore:
                 f"無法儲存貪食蛇排行榜：{self.path}\n{error}"
             ) from error
 
-    def record(self, name: object, score: object) -> SnakeScoreEntry:
-        normalized_name = normalize_player_name(name)
+    def record(self, name: object, score: object, *, computer_name="") -> SnakeScoreEntry:
+        normalized_name = normalize_computer_name(computer_name) or normalize_player_name(name)
         try:
             normalized_score = max(0, int(score))
         except (TypeError, ValueError) as error:
@@ -119,6 +130,7 @@ class SnakeScoreStore:
             name=normalized_name,
             score=normalized_score,
             recorded_at_utc=datetime.now(timezone.utc).isoformat(),
+            computer_name=normalize_computer_name(computer_name),
         )
         entries = self.load()
         entries.append(entry)

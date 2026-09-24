@@ -7,8 +7,16 @@ from features.patent_review.custom_rules import (
     CustomTextRule,
 )
 from features.patent_review.figure_ocr_checker import (
+    build_embodiment_figure_comparisons,
+    drawing_description_figure_names,
+    drawing_description_figure_numbers,
+    find_unused_ocr_figures,
+    mapped_ocr_figure_numbers,
     parse_figure_number_mapping,
+    parse_cross_section_references,
+    parse_figure_references,
     parse_leading_figure_reference,
+    roman_numeral_to_int,
 )
 from features.patent_review.rule_engine import RULE_CATALOG, review_document
 from features.patent_review.section_parser import assign_sections
@@ -140,8 +148,19 @@ VALID_LINES = [
 
 
 class PatentTextRuleTests(unittest.TestCase):
-    def test_valid_document_has_no_stage2_issues(self):
+    def test_major_sections_do_not_require_word_section_breaks(self):
         document = build_document(VALID_LINES)
+        for paragraph in document.paragraphs:
+            paragraph.section_break_type = ""
+        rule_ids = {issue.rule_id for issue in review_document(document).issues}
+        self.assertNotIn("STR009", rule_ids)
+
+    def test_valid_document_has_no_stage2_issues(self):
+        lines = list(VALID_LINES)
+        # A document that also satisfies CLM019 must disclose claim 1's
+        # component, not only its invention title, in the disclosure section.
+        lines[lines.index("本新型提供一種測試裝置。")] = "本新型提供一種測試裝置，包含一主箱體。"
+        document = build_document(lines)
         review = review_document(document)
 
         self.assertGreaterEqual(len(RULE_CATALOG), 48)
@@ -149,6 +168,11 @@ class PatentTextRuleTests(unittest.TestCase):
         self.assertNotIn("SYM002", {rule.rule_id for rule in RULE_CATALOG})
         self.assertEqual(review.issues, [])
         self.assertEqual(review.to_dict()["summary"]["total"], 0)
+
+    def test_legacy_valid_document_now_reminds_about_missing_claim_disclosure(self):
+        review = review_document(build_document(VALID_LINES))
+        self.assertTrue([issue for issue in review.issues if issue.rule_id == "CLM019"])
+        self.assertEqual([issue for issue in review.issues if issue.rule_id != "CLM019"], [])
 
     def test_required_section_ending_punctuation_is_reported(self):
         lines = list(VALID_LINES)
@@ -184,6 +208,69 @@ class PatentTextRuleTests(unittest.TestCase):
         ]
 
         self.assertEqual(punctuation_issues, [])
+
+    def test_embodiment_table_content_has_no_terminal_punctuation_rule(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines.insert(embodiment_index + 1, "表格中的實施方式內容")
+        document = build_document(
+            lines,
+            table_cells={embodiment_index + 1: (0, 0, 0)},
+        )
+
+        punctuation_issues = [
+            issue
+            for issue in review_document(document).issues
+            if issue.rule_id == "PCT002"
+            and issue.paragraph_index == embodiment_index + 1
+        ]
+
+        self.assertEqual(punctuation_issues, [])
+
+    def test_embodiment_colon_is_allowed_except_on_the_last_content_paragraph(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            "參閱圖1，本實施例包含下列構件：",
+            "主箱體10及分隔板20共同形成測試裝置。",
+        ]
+        valid_issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "PCT002"
+            and issue.section_key == "embodiments"
+        ]
+        self.assertEqual(valid_issues, [])
+
+        lines[embodiment_index + 1] = "主箱體10及分隔板20共同形成測試裝置："
+        invalid_issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "PCT002"
+            and issue.section_key == "embodiments"
+        ]
+        self.assertEqual(len(invalid_issues), 1)
+        self.assertEqual(invalid_issues[0].paragraph_index, embodiment_index + 1)
+
+    def test_embodiment_half_width_colon_can_introduce_the_next_paragraph(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            (
+                "參閱圖14至16，為本發明的一第二實施例，類似於該第一實施例，"
+                "差異處在於:"
+            ),
+            "本實施例的主箱體10及分隔板20採用不同配置。",
+        ]
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "PCT002"
+            and issue.paragraph_index == embodiment_index
+        ]
+
+        self.assertEqual(issues, [])
 
     def test_multiple_drawing_captions_use_ordered_endings(self):
         lines = list(VALID_LINES)
@@ -410,6 +497,30 @@ class PatentTextRuleTests(unittest.TestCase):
         self.assertIn("FIG001", rule_ids)
         self.assertIn("FIG002", rule_ids)
 
+    def test_entire_description_accepts_one_to_four_digit_automatic_paragraph_numbers(self):
+        for display in ("【1】", "【01】", "【001】", "【0001】"):
+            with self.subTest(display=display):
+                document = build_document(VALID_LINES)
+                numbered_paragraphs = [
+                    paragraph
+                    for paragraph in document.paragraphs
+                    if paragraph.major_section_key == "major_description"
+                    and paragraph.numbering_value is not None
+                ]
+                for paragraph in numbered_paragraphs:
+                    width = len(display) - 2
+                    paragraph.numbering_text = (
+                        f"【{paragraph.numbering_value:0{width}d}】"
+                    )
+
+                format_issues = [
+                    issue
+                    for issue in review_document(document).issues
+                    if issue.rule_id == "PNO002"
+                ]
+
+                self.assertEqual(format_issues, [])
+
     def test_detects_body_symbol_mismatch_and_missing_symbol(self):
         lines = list(VALID_LINES)
         lines[lines.index("測試裝置包含主箱體10及分隔板20。")] = (
@@ -485,6 +596,99 @@ class PatentTextRuleTests(unittest.TestCase):
 
         self.assertIn("STR001", rule_ids)
         self.assertIn("STR005", rule_ids)
+
+    def test_claim_full_stop_limit_reports_number_and_count_for_both_patent_types(self):
+        for patent_word in ("新型", "發明"):
+            with self.subTest(patent_word=patent_word):
+                lines = [line.replace("新型", patent_word) for line in VALID_LINES]
+                lines[-2] = "【請求項1】一種測試裝置，包含一主箱體。該主箱體具有一開口。另一句。"
+                document = build_document(lines)
+                original_texts = [paragraph.text for paragraph in document.paragraphs]
+                issues = [issue for issue in review_document(document).issues if issue.rule_id == "CLM009"]
+                self.assertEqual(len(issues), 1)
+                issue = issues[0]
+                self.assertEqual(issue.details, {"claim_number": 1, "full_stop_count": 3})
+                self.assertIn("請求項1共出現3個句號", issue.message)
+                self.assertEqual(issue.severity, "error")
+                self.assertEqual(issue.matched_text, "。")
+                paragraph = document.paragraphs[issue.paragraph_index]
+                self.assertEqual(issue.char_start, paragraph.text.index("。"))
+                self.assertFalse(issue.safe_auto_fix)
+                self.assertIsNone(issue.replacement)
+                self.assertEqual([paragraph.text for paragraph in document.paragraphs], original_texts)
+
+    def test_claim_full_stop_counts_are_independent_per_claim(self):
+        lines = list(VALID_LINES)
+        lines[-2] += "該主箱體具有一開口。"
+        lines[-1] += "該分隔板具有一開口。該開口連通該主箱體。"
+        issues = [issue for issue in review_document(build_document(lines)).issues if issue.rule_id == "CLM009"]
+        self.assertEqual(
+            [(issue.details["claim_number"], issue.details["full_stop_count"]) for issue in issues],
+            [(1, 2), (2, 3)],
+        )
+
+    def test_claim_full_stop_count_spans_word_paragraphs_and_soft_line_breaks(self):
+        parts = ["一種測試裝置，包含：", "一主箱體。", "該主箱體具有一開口。"]
+        for separate_paragraphs in (True, False):
+            with self.subTest(separate_paragraphs=separate_paragraphs):
+                lines = list(VALID_LINES)
+                lines[-2:-1] = (
+                    ["【請求項1】" + parts[0], *parts[1:]] if separate_paragraphs
+                    else ["【請求項1】" + "\n".join(parts)]
+                )
+                document = build_document(lines)
+                issues = [issue for issue in review_document(document).issues if issue.rule_id == "CLM009"]
+                self.assertEqual(len(issues), 1)
+                self.assertEqual(issues[0].details, {"claim_number": 1, "full_stop_count": 2})
+                paragraph = document.paragraphs[issues[0].paragraph_index]
+                self.assertEqual(paragraph.text[issues[0].char_start:issues[0].char_end], "。")
+                self.assertIn("一主箱體。", paragraph.text)
+                if separate_paragraphs:
+                    self.assertEqual(paragraph.text, parts[1])
+
+    def test_claim_full_stop_missing_and_misplaced_remain_reported(self):
+        for ending, count, message in (
+            ("一主箱體；", 0, "沒有全形句號"),
+            ("一主箱體。該主箱體具有一開口；", 1, "不在句尾"),
+        ):
+            with self.subTest(count=count):
+                lines = list(VALID_LINES)
+                lines[-2:-1] = ["【請求項1】一種測試裝置，包含：", ending]
+                document = build_document(lines)
+                issues = [issue for issue in review_document(document).issues if issue.rule_id == "CLM009"]
+                self.assertEqual(len(issues), 1)
+                self.assertEqual(issues[0].details["full_stop_count"], count)
+                self.assertIn(message, issues[0].message)
+                self.assertEqual(document.paragraphs[issues[0].paragraph_index].text, ending)
+                self.assertEqual(issues[0].matched_text, "。" if count else "；")
+
+    def test_claim_full_stop_highlight_does_not_point_into_previous_inline_claim(self):
+        lines = list(VALID_LINES)
+        lines[-2:] = [lines[-2] + lines[-1] + "該分隔板具有一開口。"]
+        document = build_document(lines)
+        issues = [issue for issue in review_document(document).issues if issue.rule_id == "CLM009"]
+        self.assertEqual(len(issues), 1)
+        issue = issues[0]
+        self.assertEqual(issue.details, {"claim_number": 2, "full_stop_count": 2})
+        paragraph = document.paragraphs[issue.paragraph_index]
+        self.assertGreater(issue.char_start, paragraph.text.index("請求項2"))
+        self.assertEqual(issue.matched_text, "。")
+
+    def test_claim_full_stop_does_not_count_decimal_points_or_other_sections(self):
+        lines = list(VALID_LINES)
+        lines[lines.index("摘要內容。")] = "摘要第一句。摘要第二句。"
+        lines[lines.index("本新型提供一種測試裝置。")] += "本新型也提供其他功能。"
+        lines[-2] = "【請求項1】一種測試裝置，包含一主箱體，該主箱體的寬度為1.5mm及長度為２．５mm。 \t"
+        issues = [issue for issue in review_document(build_document(lines)).issues if issue.rule_id == "CLM009"]
+        self.assertEqual(issues, [])
+
+    def test_claim_full_stop_rule_retains_table_manual_review_boundary(self):
+        lines = list(VALID_LINES)
+        lines.insert(len(lines) - 1, "表格第一句。表格第二句。")
+        table_index = len(lines) - 2
+        review = review_document(build_document(lines, table_cells={table_index: (0, 0, 0)}))
+        self.assertFalse(any(issue.rule_id == "CLM009" for issue in review.issues))
+        self.assertTrue(any(issue.rule_id == "TBL001" for issue in review.issues))
 
     def test_blank_word_paragraphs_are_not_reported(self):
         lines = list(VALID_LINES)
@@ -966,6 +1170,192 @@ class PatentTextRuleTests(unittest.TestCase):
 
         self.assertEqual([issue for issue in issues if issue.rule_id == "CLM012"], [])
 
+    def test_plural_component_accepts_each_own_reference(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines[symbol_insert:symbol_insert] = [
+            "30:儲存模組",
+            "31:帳戶資訊",
+            "32:個人資訊",
+            "33:處理模組",
+        ]
+        lines[-2:] = [
+            (
+                "【請求項1】一種測試裝置，包含一儲存模組及一處理模組，"
+                "該儲存模組儲存有複數帳戶資訊及複數個人資訊，每一該帳戶資訊"
+                "對應各自的該個人資訊，且該處理模組處理該等帳戶資訊。"
+            ),
+            (
+                "【請求項2】如請求項1所述的測試裝置，其中各自的該個人資訊"
+                "分別對應該等帳戶資訊。"
+            ),
+        ]
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id in {"CLM012", "CLM016"}
+            and issue.details.get("component_name") == "個人資訊"
+        ]
+
+        self.assertEqual(issues, [])
+
+    def test_repeated_same_quantity_mismatch_is_reported_once_per_claim(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines[symbol_insert:symbol_insert] = [
+            "30:儲存模組",
+            "31:帳戶資訊",
+            "32:處理模組",
+        ]
+        lines[-2:] = [
+            (
+                "【請求項1】一種測試裝置，包含一儲存模組及一處理模組，"
+                "該儲存模組儲存有複數帳戶資訊，且該處理模組判斷該帳戶資訊、"
+                "更新該帳戶資訊並輸出該帳戶資訊。"
+            ),
+            "【請求項2】如請求項1所述的測試裝置，其中該處理模組輸出結果。",
+        ]
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "CLM012"
+            and issue.details.get("component_name") == "帳戶資訊"
+            and "使用單數指稱" in issue.message
+        ]
+
+        self.assertEqual(len(issues), 1)
+
+    def test_counted_definite_component_references_remain_plural(self):
+        for reference in ("二個該", "三個該", "四個該", "多個該"):
+            with self.subTest(reference=reference):
+                lines = list(VALID_LINES)
+                symbol_insert = lines.index("20:分隔板") + 1
+                lines[symbol_insert:symbol_insert] = [
+                    "30:架體",
+                    "31:橫梁",
+                    "32:開口",
+                ]
+                lines[-2:] = [
+                    (
+                        "【請求項1】一種測試裝置，包含複數架體，每一該架體"
+                        "形成有複數該橫梁及複數開口，每一該開口形成於"
+                        f"{reference}橫梁之間。"
+                    ),
+                    (
+                        "【請求項2】如請求項1所述的測試裝置，其中該等橫梁"
+                        "彼此間隔。"
+                    ),
+                ]
+
+                issues = [
+                    issue
+                    for issue in review_document(build_document(lines)).issues
+                    if issue.rule_id in {"CLM012", "CLM016"}
+                    and issue.details.get("component_name") in {
+                        "架體",
+                        "橫梁",
+                        "開口",
+                    }
+                ]
+
+                self.assertEqual(issues, [])
+
+    def test_enumeration_quantifiers_establish_plural_steps(self):
+        for quantifier in ("以下", "下列", "幾個", "數個", "多個"):
+            with self.subTest(quantifier=quantifier):
+                lines = list(VALID_LINES)
+                symbol_insert = lines.index("20:分隔板") + 1
+                lines.insert(symbol_insert, "30:步驟")
+                lines[-2:] = [
+                    (
+                        "【請求項1】一種控制方法，包含一控制器，該控制方法還包含"
+                        f"{quantifier}步驟，該等步驟依序執行。"
+                    ),
+                    (
+                        "【請求項2】如請求項1所述的控制方法，其中該等步驟"
+                        "分別產生一處理結果。"
+                    ),
+                ]
+
+                issues = [
+                    issue
+                    for issue in review_document(build_document(lines)).issues
+                    if issue.rule_id in {"CLM012", "CLM016"}
+                    and issue.details.get("component_name") == "步驟"
+                ]
+
+                self.assertEqual(issues, [])
+
+    def test_step_is_quantity_exempt_but_still_requires_embodiment_label(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines.insert(symbol_insert, "30:步驟")
+        lines[lines.index("測試裝置包含主箱體10及分隔板20。")] = (
+            "參閱圖1，該步驟執行測試操作。"
+        )
+        lines[-2:] = [
+            (
+                "【請求項1】一種控制方法，包含步驟，該步驟接收資料，"
+                "且該等步驟依序執行。"
+            ),
+            (
+                "【請求項2】如請求項1所述的控制方法，其中步驟產生結果。"
+            ),
+        ]
+
+        review = review_document(build_document(lines))
+        quantity_issues = [
+            issue
+            for issue in review.issues
+            if issue.rule_id in {"CLM012", "CLM016"}
+            and issue.details.get("component_name") == "步驟"
+        ]
+        missing_label_issues = [
+            issue
+            for issue in review.issues
+            if issue.rule_id == "REF004"
+            and issue.matched_text == "步驟"
+        ]
+
+        self.assertEqual(quantity_issues, [])
+        self.assertEqual(len(missing_label_issues), 1)
+
+    def test_ordinal_modifier_between_article_and_base_component_is_preserved(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines[symbol_insert:symbol_insert] = [
+            "30:PTC單元",
+            "31:PTC元件",
+            "32:壓敏電阻器",
+            "33:二極體",
+            "34:第一節點",
+            "35:第二節點",
+        ]
+        lines[-2:] = [
+            (
+                "【請求項1】一種電路保護裝置，包含一PTC單元、"
+                "一壓敏電阻器及一二極體。"
+            ),
+            (
+                "【請求項2】如請求項1所述的電路保護裝置，其中，"
+                "該PTC單元包括一第一PTC元件及一第二PTC元件，"
+                "該第一PTC元件與該壓敏電阻器在一第一節點及一第二節點"
+                "之間以串連方式電連接，該第二PTC元件與該二極體在"
+                "該第一節點及該第二節點之間以串連方式電連接。"
+            ),
+        ]
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id in {"CLM012", "CLM016"}
+            and issue.details.get("component_name") == "PTC元件"
+        ]
+
+        self.assertEqual(issues, [])
+
     def test_similar_component_name_typo_is_a_warning(self):
         lines = list(VALID_LINES)
         lines.insert(lines.index("【新型申請專利範圍】"), "11:第一齒輪")
@@ -1007,6 +1397,30 @@ class PatentTextRuleTests(unittest.TestCase):
 
         self.assertNotIn("第一尺輪", typo_candidates)
         self.assertIn("第一齒倫", typo_candidates)
+
+    def test_document_phrase_whitelist_protects_embedded_component_only_in_phrase(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines.insert(symbol_insert, "2:建築")
+        embodiment_text = (
+            "該建 築物結構檢查報告已完成，且該建築仍待檢查。"
+        )
+        lines[lines.index("測試裝置包含主箱體10及分隔板20。")] = embodiment_text
+
+        review = review_document(
+            build_document(lines),
+            component_reference_whitelist=["建築物結構檢查報告"],
+        )
+        missing_labels = [
+            issue
+            for issue in review.issues
+            if issue.rule_id == "REF004"
+            and issue.details.get("component_name") == "建築"
+        ]
+
+        self.assertEqual(len(missing_labels), 1)
+        self.assertEqual(missing_labels[0].matched_text, "建築")
+        self.assertEqual(missing_labels[0].char_start, embodiment_text.rfind("建築"))
 
     def test_reordered_component_name_and_one_substitution_are_warnings(self):
         lines = list(VALID_LINES)
@@ -1147,6 +1561,52 @@ class PatentTextRuleTests(unittest.TestCase):
                 for issue in issues
             )
         )
+
+    def test_component_label_inserted_inside_complete_patent_title_is_error(self):
+        title = "平板觸控裝置"
+        lines = [
+            line.replace("測試裝置", title)
+            if line.startswith("【中文新型名稱】")
+            else line
+            for line in VALID_LINES
+        ]
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines.insert(symbol_insert, "5:平板")
+        body = "本新型平板5觸控裝置，包含主箱體10；因此，該平板5可供操作。"
+        lines[lines.index("測試裝置包含主箱體10及分隔板20。")] = body
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "REF006"
+        ]
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details.get("patent_title"), title)
+        self.assertEqual(issues[0].details.get("component_name"), "平板")
+        self.assertEqual(issues[0].details.get("inserted_label"), "5")
+        self.assertEqual(
+            body[issues[0].char_start:issues[0].char_end],
+            "5",
+        )
+
+    def test_independent_component_label_after_correct_complete_title_remains_legal(self):
+        title = "平板觸控裝置"
+        lines = [
+            line.replace("測試裝置", title)
+            if line.startswith("【中文新型名稱】")
+            else line
+            for line in VALID_LINES
+        ]
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines.insert(symbol_insert, "5:平板")
+        lines[lines.index("測試裝置包含主箱體10及分隔板20。")] = (
+            "本新型平板觸控裝置包含主箱體10；因此，該平板5可供操作。"
+        )
+
+        issues = review_document(build_document(lines)).issues
+
+        self.assertFalse(any(issue.rule_id == "REF006" for issue in issues))
 
     def test_embodiment_instance_subject_does_not_need_component_labels(self):
         lines = list(VALID_LINES)
@@ -1370,7 +1830,7 @@ class PatentTextRuleTests(unittest.TestCase):
                 self.assertEqual(failures, [])
                 self.assertEqual(review.claim_subjects, ["培林裝置"])
 
-    def test_quantified_as_described_range_inherits_all_prior_claim_foundations(self):
+    def test_quantified_as_described_range_checks_each_prior_claim_foundation(self):
         title = "培林裝置"
         lines = [
             line.replace("測試裝置", title)
@@ -1409,7 +1869,15 @@ class PatentTextRuleTests(unittest.TestCase):
             }
         ]
 
-        self.assertEqual(failures, [])
+        self.assertEqual(len(failures), 7)
+        self.assertTrue(all(issue.rule_id == "CLM016" for issue in failures))
+        self.assertTrue(all(
+            issue.details["component_name"] == "中間元件" for issue in failures
+        ))
+        self.assertEqual(
+            {tuple(issue.details["dependency_path"]) for issue in failures},
+            {(1,), (2, 1), (3, 1), (5, 1), (6, 1), (7, 1), (8, 1)},
+        )
         self.assertEqual(review.claim_subjects, ["培林裝置"])
 
     def test_quantified_as_described_component_inside_second_independent_claim(self):
@@ -1630,6 +2098,34 @@ class PatentTextRuleTests(unittest.TestCase):
                 "第一側方向",
                 "橫軸向",
             }
+        ]
+
+        self.assertEqual(issues, [])
+
+    def test_two_subjects_do_not_pluralize_a_singular_circumferential_direction(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines[symbol_insert:symbol_insert] = [
+            "30:軸線",
+            "31:第一周向",
+        ]
+        lines[-2:] = [
+            (
+                "【請求項1】一種測試裝置，包含一主箱體、一分隔板及一軸線，"
+                "其中兩者沿一繞該軸線的第一周向交錯設置，且該第一周向"
+                "環繞該軸線。"
+            ),
+            (
+                "【請求項2】如請求項1所述的測試裝置，其中該第一周向"
+                "為順時針方向。"
+            ),
+        ]
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id in {"CLM012", "CLM016"}
+            and issue.details.get("component_name") == "第一周向"
         ]
 
         self.assertEqual(issues, [])
@@ -1994,7 +2490,7 @@ class PatentTextRuleTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
-    def test_singular_reference_after_plural_is_temporarily_allowed(self):
+    def test_plain_singular_reference_after_plural_is_an_error(self):
         lines = list(VALID_LINES)
         symbol_insert = lines.index("20:分隔板") + 1
         lines[symbol_insert:symbol_insert] = [
@@ -2019,7 +2515,46 @@ class PatentTextRuleTests(unittest.TestCase):
             and issue.details.get("component_name") == "輥本體"
         ]
 
-        self.assertEqual(issues, [])
+        self.assertTrue(issues)
+        self.assertTrue(
+            any("先前是以複數或指定多數揭露" in issue.message for issue in issues)
+        )
+        self.assertTrue(all(issue.severity == "error" for issue in issues))
+
+    def test_corresponding_singular_reference_after_plural_is_an_error(self):
+        lines = list(VALID_LINES)
+        symbol_insert = lines.index("20:分隔板") + 1
+        lines[symbol_insert:symbol_insert] = [
+            "120:開槽",
+            "121:導向件",
+        ]
+        lines[-2:] = [
+            (
+                "【請求項1】一種測試裝置，包含複數開槽及複數導向件，"
+                "該等導向件分別連接對應的該開槽。"
+            ),
+            (
+                "【請求項2】如請求項1所述的測試裝置，其中相對應之該開槽"
+                "沿一方向延伸。"
+            ),
+        ]
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "CLM012"
+            and issue.details.get("component_name") == "開槽"
+        ]
+
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(
+            {issue.details.get("highlight_text") for issue in issues},
+            {"對應的該開槽", "相對應之該開槽"},
+        )
+        self.assertTrue(
+            all("先前是以複數或指定多數揭露" in issue.message for issue in issues)
+        )
+        self.assertTrue(all(issue.severity == "error" for issue in issues))
 
     def test_distributive_hierarchy_allows_sibling_singular_children(self):
         lines = list(VALID_LINES)
@@ -2194,6 +2729,46 @@ class PatentTextRuleTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_embodiment_figure_reference_limit_accepts_four_figures(self):
+        for reference_text in (
+            "參閱圖1到圖4",
+            "參閱圖1到圖3，及圖6",
+        ):
+            with self.subTest(reference_text=reference_text):
+                lines = list(VALID_LINES)
+                embodiment_index = lines.index("【實施方式】") + 1
+                lines[embodiment_index] = (
+                    f"{reference_text}，主箱體10及分隔板20形成測試裝置。"
+                )
+
+                issues = [
+                    issue
+                    for issue in review_document(build_document(lines)).issues
+                    if issue.rule_id == "REF007"
+                ]
+
+                self.assertEqual(issues, [])
+
+    def test_embodiment_figure_reference_limit_rejects_more_than_four_figures(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = (
+            "參閱圖1到圖4，及圖6，主箱體10及分隔板20形成測試裝置。"
+        )
+
+        issues = [
+            issue
+            for issue in review_document(build_document(lines)).issues
+            if issue.rule_id == "REF007"
+        ]
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].severity, "error")
+        self.assertEqual(issues[0].details["referenced_figures"], [1, 2, 3, 4, 6])
+        self.assertEqual(issues[0].details["figure_count"], 5)
+        self.assertEqual(issues[0].details["maximum_figure_count"], 4)
+        self.assertIn("超過每段最多4張的上限", issues[0].message)
+
     def test_leading_figure_parser_stops_before_component_labels(self):
         reference = parse_leading_figure_reference(
             "參閱圖1到圖4以及圖6所示的主箱體10及分隔板20。"
@@ -2203,10 +2778,412 @@ class PatentTextRuleTests(unittest.TestCase):
         self.assertEqual(reference.figures, (1, 2, 3, 4, 6))
         self.assertNotIn("10", reference.text)
 
+    def test_figure_reference_grammar_accepts_synonyms_ranges_lists_and_subfigures(self):
+        cases = {
+            "參閱圖1": (1,),
+            "參照圖1、圖2及圖3": (1, 2, 3),
+            "參考圖1到4": (1, 2, 3, 4),
+            "參閱圖1至4、5": (1, 2, 3, 4, 5),
+            "參閱圖1到圖3，及圖6": (1, 2, 3, 6),
+            "參考圖1至4": (1, 2, 3, 4),
+            "參閱圖3A、3B及4": ("3A", "3B", 4),
+            "參閱圖3A、圖3B及圖4": ("3A", "3B", 4),
+            "參照圖1到圖4": (1, 2, 3, 4),
+            "參閱圖8-圖12": (8, 9, 10, 11, 12),
+            "參閱圖8A-圖8E": ("8A", "8B", "8C", "8D", "8E"),
+            "參閱圖8a-圖8e": ("8A", "8B", "8C", "8D", "8E"),
+            "參閱圖8A到圖8E": ("8A", "8B", "8C", "8D", "8E"),
+            "參閱圖8a到圖8e": ("8A", "8B", "8C", "8D", "8E"),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                references = parse_figure_references(text + "，元件10。")
+                self.assertTrue(references)
+                self.assertEqual(references[0].figures, expected)
+
+    def test_mid_paragraph_figure_references_create_multiple_active_scopes(self):
+        references = parse_figure_references(
+            "現在轉向圖式，圖1和圖2分別示出連接器組件100的前視立體圖"
+            "和後視立體圖，以及圖3釋出連接器組件100的一前視圖。"
+        )
+
+        self.assertEqual(
+            [reference.figures for reference in references],
+            [(1, 2), (3,)],
+        )
+
+    def test_example_figure_reference_adds_to_leading_figures_in_one_row(self):
+        references = parse_figure_references(
+            "參閱圖2及圖4，主箱體10已設置，例如為圖5，"
+            "分隔板20及元件30彼此連接。"
+        )
+        self.assertEqual(
+            [reference.figures for reference in references],
+            [(2, 4), (5,)],
+        )
+        self.assertFalse(references[0].additive)
+        self.assertTrue(references[1].additive)
+
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = (
+            "參閱圖2及圖4，主箱體10已設置，例如為圖5，"
+            "分隔板20及元件30彼此連接。"
+        )
+        symbol_index = lines.index("20:分隔板") + 1
+        lines.insert(symbol_index, "30:元件")
+        comparisons = build_embodiment_figure_comparisons(
+            build_document(lines),
+            [
+                {"figure_numbers": [2], "numbers": ["10", "30"]},
+                {"figure_numbers": [4], "numbers": []},
+                {"figure_numbers": [5], "numbers": ["20"]},
+            ],
+        )
+
+        self.assertEqual(len(comparisons), 1)
+        self.assertEqual(comparisons[0].referenced_figures, [2, 4, 5])
+        self.assertEqual(comparisons[0].paragraph_labels, ["10", "20", "30"])
+        self.assertEqual(comparisons[0].labels_not_in_drawings, [])
+
+    def test_additive_figure_does_not_rescue_label_before_the_example(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = (
+            "參閱圖2及圖4，主箱體10已設置，例如為圖5，分隔板20彼此連接。"
+        )
+        comparisons = build_embodiment_figure_comparisons(
+            build_document(lines),
+            [
+                {"figure_numbers": [2], "numbers": []},
+                {"figure_numbers": [4], "numbers": []},
+                {"figure_numbers": [5], "numbers": ["10", "20"]},
+            ],
+        )
+
+        self.assertEqual(len(comparisons), 1)
+        self.assertEqual(comparisons[0].referenced_figures, [2, 4, 5])
+        self.assertEqual(comparisons[0].labels_not_in_drawings, ["10"])
+
+    def test_drawing_comparison_stops_at_concluding_embodiment_paragraph(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            "參閱圖1，主箱體10形成測試裝置。",
+            "參閱圖2，綜 上 所 述，分隔板20已完成設置。",
+            "參閱圖3，分隔板20仍可進一步調整。",
+        ]
+        document = build_document(lines)
+        comparisons = build_embodiment_figure_comparisons(
+            document,
+            [
+                {"figure_numbers": [1], "numbers": ["10"]},
+                {"figure_numbers": [2], "numbers": []},
+                {"figure_numbers": [3], "numbers": []},
+            ],
+        )
+
+        self.assertEqual(len(comparisons), 1)
+        self.assertEqual(comparisons[0].referenced_figures, [1])
+        issues = [
+            issue
+            for issue in review_document(
+                document,
+                ocr_results=[
+                    {"figure_numbers": [1], "numbers": ["10"]},
+                    {"figure_numbers": [2], "numbers": []},
+                    {"figure_numbers": [3], "numbers": []},
+                ],
+            ).issues
+            if issue.rule_id == "OCR001"
+        ]
+        self.assertEqual(issues, [])
+
+    def test_conclusion_in_continuation_excludes_the_whole_numbered_group(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            "參閱圖1，主箱體10形成測試裝置。",
+            "綜上所述，分隔板20已完成設置。",
+        ]
+        document = build_document(lines)
+        continuation = document.paragraphs[embodiment_index + 1]
+        continuation.numbering_id = None
+        continuation.numbering_value = None
+        continuation.numbering_text = ""
+
+        comparisons = build_embodiment_figure_comparisons(
+            document,
+            [{"figure_numbers": [1], "numbers": ["10", "20"]}],
+        )
+
+        self.assertEqual(comparisons, [])
+
+    def test_mid_paragraph_switch_compares_only_following_component_labels(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = (
+            "參閱圖2，電路保護裝置E2已構成。"
+            "在圖3中，PTC元件30與第一節點31電連接。"
+        )
+        symbol_index = lines.index("20:分隔板") + 1
+        lines[symbol_index:symbol_index] = [
+            "E2:電路保護裝置",
+            "30:PTC元件",
+            "31:第一節點",
+        ]
+        issues = [
+            issue
+            for issue in review_document(
+                build_document(lines),
+                ocr_results=[
+                    {"source_image_name": "圖2.png", "numbers": ["E2"]},
+                    {"source_image_name": "圖3.png", "numbers": ["30", "31"]},
+                ],
+            ).issues
+            if issue.rule_id == "OCR001"
+        ]
+
+        self.assertEqual(issues, [])
+
+    def test_mid_paragraph_reference_after_step_or_embodiment_intro_is_not_missed(self):
+        for prefix in ("步驟E，控制器開始執行。", "在本實施例中，流程先被初始化。"):
+            with self.subTest(prefix=prefix):
+                lines = list(VALID_LINES)
+                embodiment_index = lines.index("【實施方式】") + 1
+                lines[embodiment_index:embodiment_index + 1] = [
+                    "參閱圖2，主箱體10形成測試裝置。",
+                    prefix + "參閱圖1與圖4，分隔板20已設置。",
+                ]
+                document = build_document(lines)
+                comparisons = build_embodiment_figure_comparisons(
+                    document,
+                    [
+                        {"figure_numbers": [2], "numbers": ["10"]},
+                        {"figure_numbers": [1], "numbers": ["20"]},
+                        {"figure_numbers": [4], "numbers": []},
+                    ],
+                )
+
+                second_group = [
+                    item for item in comparisons if item.group_index == 2
+                ]
+                self.assertEqual(len(second_group), 1)
+                self.assertEqual(second_group[0].referenced_figures, [1, 4])
+                self.assertEqual(second_group[0].paragraph_labels, ["20"])
+                self.assertFalse(second_group[0].inherited_reference)
+
+    def test_alphanumeric_subfigures_are_mapped_and_compared_independently(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = (
+            "參閱圖3A、圖3B及圖4，主箱體10及分隔板20形成測試裝置。"
+        )
+        issues = [
+            issue
+            for issue in review_document(
+                build_document(lines),
+                ocr_results=[
+                    {"source_image_name": "圖3A.png", "numbers": ["10"]},
+                    {"source_image_name": "圖3B.png", "numbers": ["20"]},
+                    {"source_image_name": "圖4.png", "numbers": []},
+                ],
+            ).issues
+            if issue.rule_id == "OCR001"
+        ]
+
+        self.assertEqual(issues, [])
+
     def test_editable_figure_mapping_accepts_lists_and_ranges(self):
         self.assertEqual(parse_figure_number_mapping("圖1,2及4-6"), [1, 2, 4, 5, 6])
+        self.assertEqual(parse_figure_number_mapping("圖3A,3B及4"), ["3A", "3B", 4])
+        self.assertEqual(
+            parse_figure_number_mapping("圖1'、圖A及圖B'"),
+            ["1'", "A", "B'"],
+        )
+        self.assertEqual(
+            parse_figure_number_mapping("圖8-圖12"),
+            [8, 9, 10, 11, 12],
+        )
+        for value in ("圖8A-圖8E", "圖8a-圖8e", "圖8A到圖8E"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    parse_figure_number_mapping(value),
+                    ["8A", "8B", "8C", "8D", "8E"],
+                )
         with self.assertRaises(ValueError):
             parse_figure_number_mapping("4-2")
+        with self.assertRaises(ValueError):
+            parse_figure_number_mapping("8E-8A")
+
+    def test_drawing_description_count_uses_only_leading_figure_clauses(self):
+        lines = list(VALID_LINES)
+        heading_index = lines.index("【圖式簡單說明】")
+        lines[heading_index] = "【圖式簡單說明】\n圖7為控制流程圖。"
+        caption_index = lines.index("圖1為測試裝置的立體圖。")
+        lines[caption_index] = (
+            "圖1為測試裝置的立體圖。\n"
+            "圖2，圖3，圖4為測試裝置的側視圖。\n"
+            "圖6是沿著圖99中之線VI-VI所取得的一剖視圖。\n"
+            "圖8A到圖8C為訓練畫面。"
+        )
+
+        document = build_document(lines)
+        self.assertEqual(
+            drawing_description_figure_numbers(document),
+            [7, 1, 2, 3, 4, 6, "8A", "8B", "8C"],
+        )
+        self.assertEqual(
+            drawing_description_figure_names(document)[7],
+            "控制流程圖",
+        )
+
+    def test_mapped_ocr_figure_count_uses_unique_configured_figures(self):
+        self.assertEqual(
+            mapped_ocr_figure_numbers(
+                [
+                    {"figure_numbers": [1, 2]},
+                    {"figure_numbers": [2, 3]},
+                    {"figure_numbers": "圖8a到圖8c"},
+                ]
+            ),
+            [1, 2, 3, "8A", "8B", "8C"],
+        )
+
+    def test_drawing_description_names_are_extracted_per_leading_figure(self):
+        lines = list(VALID_LINES)
+        caption_index = lines.index("圖1為測試裝置的立體圖。")
+        lines[caption_index] = (
+            "圖1為測試裝置的立體圖；\n"
+            "圖2為測試裝置的剖視圖；\n"
+            "圖3為圖2中A部分的放大剖視圖；\n"
+            "圖4為電路方塊圖；\n"
+            "圖5為示意圖；\n"
+            "圖6是沿著圖99中之線VI-VI所取得的一俯視圖；\n"
+            "圖8a到圖8c為訓練畫面。"
+        )
+
+        self.assertEqual(
+            drawing_description_figure_names(build_document(lines)),
+            {
+                1: "立體圖",
+                2: "剖視圖",
+                3: "放大剖視圖",
+                4: "電路方塊圖",
+                5: "示意圖",
+                6: "俯視圖",
+                "8A": "訓練畫面",
+                "8B": "訓練畫面",
+                "8C": "訓練畫面",
+            },
+        )
+
+    def test_drawing_description_names_pair_distributive_captions(self):
+        lines = list(VALID_LINES)
+        caption_index = lines.index("圖1為測試裝置的立體圖。")
+        lines[caption_index] = (
+            "圖10至圖12分別為測試裝置的正視圖、側視圖及俯視圖。"
+        )
+
+        self.assertEqual(
+            drawing_description_figure_names(build_document(lines)),
+            {10: "正視圖", 11: "側視圖", 12: "俯視圖"},
+        )
+
+    def test_drawing_description_does_not_guess_incomplete_distributive_names(self):
+        lines = list(VALID_LINES)
+        caption_index = lines.index("圖1為測試裝置的立體圖。")
+        lines[caption_index] = "圖1至圖3分別為正視圖及側視圖。"
+
+        self.assertEqual(
+            drawing_description_figure_names(build_document(lines)),
+            {},
+        )
+
+    def test_display_capability_range_does_not_replace_inherited_figures(self):
+        capability_text = (
+            "在本實施例中，顯示眼鏡21可以顯示如圖8A-圖8E的五個"
+            "眼部運動訓練虛擬圖像以指引使用者作眼部運動。"
+            "當然，顯示眼鏡21也可以顯示其他訓練圖像。"
+        )
+        self.assertEqual(parse_figure_references(capability_text), [])
+
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            "參閱圖3、圖4及圖5，顯示眼鏡21包括主箱體10。",
+            capability_text,
+            "顯示眼鏡21接著依照使用者的操作繼續顯示訓練提示。",
+        ]
+        symbol_index = lines.index("20:分隔板") + 1
+        lines.insert(symbol_index, "21:顯示眼鏡")
+        document = build_document(lines)
+        ocr_results = [
+            {"figure_numbers": [3], "numbers": ["10", "21"]},
+            {"figure_numbers": [4], "numbers": []},
+            {"figure_numbers": [5], "numbers": []},
+            *(
+                {"figure_numbers": [f"8{suffix}"], "numbers": ["21"]}
+                for suffix in "ABCDE"
+            ),
+        ]
+
+        comparisons = build_embodiment_figure_comparisons(document, ocr_results)
+
+        self.assertEqual(len(comparisons), 3)
+        self.assertEqual(
+            [comparison.referenced_figures for comparison in comparisons],
+            [[3, 4, 5], [3, 4, 5], [3, 4, 5]],
+        )
+        self.assertEqual(
+            [comparison.inherited_reference for comparison in comparisons],
+            [False, True, True],
+        )
+        self.assertEqual(find_unused_ocr_figures(document, ocr_results), [])
+        reference_limit_issues = [
+            issue
+            for issue in review_document(document, ocr_results=ocr_results).issues
+            if issue.rule_id == "REF007"
+        ]
+        self.assertEqual(reference_limit_issues, [])
+
+    def test_leading_subfigure_range_still_replaces_and_propagates_active_figures(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            "參閱圖3、圖4及圖5，顯示眼鏡21包括主箱體10。",
+            "如圖8A至圖8E所示，顯示眼鏡21依序顯示五個訓練圖像。",
+            "顯示眼鏡21接著繼續顯示訓練提示。",
+        ]
+        symbol_index = lines.index("20:分隔板") + 1
+        lines.insert(symbol_index, "21:顯示眼鏡")
+
+        comparisons = build_embodiment_figure_comparisons(
+            build_document(lines),
+            [],
+        )
+
+        expected_subfigures = ["8A", "8B", "8C", "8D", "8E"]
+        self.assertEqual(
+            [comparison.referenced_figures for comparison in comparisons],
+            [[3, 4, 5], expected_subfigures, expected_subfigures],
+        )
+        self.assertEqual(
+            [comparison.inherited_reference for comparison in comparisons],
+            [False, False, True],
+        )
+
+    def test_contextual_display_filter_keeps_ordinary_mid_sentence_references(self):
+        for text in (
+            "本實施例提供如圖3所示的主箱體10。",
+            "實驗結果顯示如圖3所示的趨勢。",
+        ):
+            with self.subTest(text=text):
+                references = parse_figure_references(text)
+                self.assertEqual(
+                    [reference.figures for reference in references],
+                    [(3,)],
+                )
 
     def test_partial_reference_to_multi_figure_page_uses_subset_check(self):
         lines = list(VALID_LINES)
@@ -2320,26 +3297,262 @@ class PatentTextRuleTests(unittest.TestCase):
         self.assertNotIn("圖式有、段落沒有", issues[0].message)
 
     def test_see_figure_parenthesis_exempts_label_from_active_figure_check(self):
+        for note in (
+            "（見圖1）",
+            "（如圖1）",
+            "（如圖3所示）",
+            "（參閱圖3）",
+            "（參照圖3）",
+            "（參考圖3）",
+            "（參圖3）",
+        ):
+            with self.subTest(note=note):
+                lines = list(VALID_LINES)
+                embodiment_index = lines.index("【實施方式】") + 1
+                lines[embodiment_index] = (
+                    f"參閱圖2，分隔板20鄰近廟宇3{note}。"
+                )
+                symbol_index = lines.index("20:分隔板") + 1
+                lines.insert(symbol_index, "3:廟宇")
+
+                issues = [
+                    issue
+                    for issue in review_document(
+                        build_document(lines),
+                        ocr_results=[
+                            {"source_image_name": "圖2.png", "numbers": ["20"]},
+                        ],
+                    ).issues
+                    if issue.rule_id == "OCR001"
+                ]
+
+                self.assertEqual(issues, [])
+
+    def test_parenthetical_figure_note_binds_all_later_component_mentions(self):
+        notes = (
+            "(見圖7)",
+            "（如圖7所示）",
+            "（參閱圖7）",
+            "（參照圖7）",
+            "（參考圖7）",
+            "（參圖7）",
+        )
+        for note in notes:
+            with self.subTest(note=note):
+                lines = list(VALID_LINES)
+                embodiment_index = lines.index("【實施方式】") + 1
+                lines[embodiment_index] = (
+                    f"參閱圖1，頻率分析模型42{note}連接主箱體10，"
+                    "頻率分析模型42再輸出分析結果。"
+                )
+                symbol_index = lines.index("20:分隔板") + 1
+                lines.insert(symbol_index, "42:頻率分析模型")
+                document = build_document(lines)
+                ocr_results = [
+                    {"figure_numbers": [1], "numbers": ["10"]},
+                    {"figure_numbers": [7], "numbers": ["42"]},
+                ]
+
+                comparisons = build_embodiment_figure_comparisons(
+                    document,
+                    ocr_results,
+                )
+                figure_one = [
+                    comparison
+                    for comparison in comparisons
+                    if comparison.referenced_figures == [1]
+                ]
+                figure_seven = [
+                    comparison
+                    for comparison in comparisons
+                    if comparison.referenced_figures == [7]
+                ]
+                self.assertTrue(figure_one)
+                self.assertNotIn("42", figure_one[0].paragraph_labels)
+                self.assertTrue(figure_seven)
+                self.assertEqual(figure_seven[0].paragraph_labels, ["42"])
+                self.assertEqual(figure_seven[0].labels_not_in_drawings, [])
+
+                issues = [
+                    issue
+                    for issue in review_document(
+                        document,
+                        ocr_results=ocr_results,
+                    ).issues
+                    if issue.rule_id == "OCR001"
+                ]
+                self.assertEqual(issues, [])
+
+    def test_parenthetical_figure_binding_reports_missing_label_on_bound_figure(self):
         lines = list(VALID_LINES)
         embodiment_index = lines.index("【實施方式】") + 1
         lines[embodiment_index] = (
-            "參閱圖2，分隔板20鄰近廟宇3（見圖1）。"
+            "參閱圖1，頻率分析模型42（見圖7）連接主箱體10，"
+            "頻率分析模型42再輸出分析結果。"
         )
         symbol_index = lines.index("20:分隔板") + 1
-        lines.insert(symbol_index, "3:廟宇")
-
+        lines.insert(symbol_index, "42:頻率分析模型")
         issues = [
             issue
             for issue in review_document(
                 build_document(lines),
                 ocr_results=[
-                    {"source_image_name": "圖2.png", "numbers": ["20"]},
+                    {"figure_numbers": [1], "numbers": ["10"]},
+                    {"figure_numbers": [7], "numbers": []},
                 ],
             ).issues
             if issue.rule_id == "OCR001"
         ]
 
-        self.assertEqual(issues, [])
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details["referenced_figures"], [7])
+        self.assertEqual(issues[0].details["labels_not_in_drawings"], ["42"])
+
+    def test_parenthetical_binding_does_not_reassign_an_earlier_mention(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = (
+            "參閱圖1，頻率分析模型42先執行取樣，接著頻率分析模型42"
+            "（見圖7）輸出分析結果，頻率分析模型42再儲存結果。"
+        )
+        symbol_index = lines.index("20:分隔板") + 1
+        lines.insert(symbol_index, "42:頻率分析模型")
+        issues = [
+            issue
+            for issue in review_document(
+                build_document(lines),
+                ocr_results=[
+                    {"figure_numbers": [1], "numbers": []},
+                    {"figure_numbers": [7], "numbers": ["42"]},
+                ],
+            ).issues
+            if issue.rule_id == "OCR001"
+        ]
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details["referenced_figures"], [1])
+        self.assertEqual(issues[0].details["labels_not_in_drawings"], ["42"])
+
+    def test_parenthetical_figure_binding_stops_at_next_numbered_paragraph(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index:embodiment_index + 1] = [
+            "參閱圖1，頻率分析模型42（見圖7）輸出第一分析結果。",
+            "參閱圖1，頻率分析模型42輸出第二分析結果。",
+        ]
+        symbol_index = lines.index("20:分隔板") + 1
+        lines.insert(symbol_index, "42:頻率分析模型")
+        issues = [
+            issue
+            for issue in review_document(
+                build_document(lines),
+                ocr_results=[
+                    {"figure_numbers": [1], "numbers": []},
+                    {"figure_numbers": [7], "numbers": ["42"]},
+                ],
+            ).issues
+            if issue.rule_id == "OCR001"
+        ]
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details["referenced_figures"], [1])
+        self.assertEqual(issues[0].details["labels_not_in_drawings"], ["42"])
+
+    def test_roman_numeral_conversion_is_strict(self):
+        self.assertEqual(roman_numeral_to_int("VI"), 6)
+        self.assertEqual(roman_numeral_to_int("Ⅷ"), 8)
+        self.assertEqual(roman_numeral_to_int("XIV"), 14)
+        self.assertIsNone(roman_numeral_to_int("IIII"))
+        self.assertIsNone(roman_numeral_to_int("VX"))
+
+    def test_cross_section_caption_grammar_is_flexible(self):
+        captions = (
+            "圖6是沿著圖3中之線VI-VI所取得的一剖視圖。",
+            "圖6為依圖3之剖切線VI－VI取得的剖面圖。",
+            "圖6係取自圖3中截切線VI～VI的一截面圖。",
+            "圖6顯示由圖3的VI至VI剖切線形成之斷面圖。",
+            "圖6是沿圖3的線Ⅵ－Ⅵ所取得之剖面圖。",
+        )
+        for caption in captions:
+            with self.subTest(caption=caption):
+                lines = list(VALID_LINES)
+                lines[lines.index("圖1為測試裝置的立體圖。")] = caption
+                document = build_document(lines)
+                references = parse_cross_section_references(document)
+                self.assertEqual(len(references), 1)
+                self.assertEqual(references[0].target_figure, 6)
+                self.assertEqual(references[0].source_figures, (3,))
+                self.assertEqual(references[0].roman_value, 6)
+
+                issues = [
+                    issue
+                    for issue in review_document(
+                        document,
+                        ocr_results=[
+                            {"figure_numbers": [3], "numbers": ["VI"]},
+                        ],
+                    ).issues
+                    if issue.rule_id == "OCR002"
+                ]
+                self.assertEqual(issues, [])
+
+    def test_cross_section_rule_reports_roman_target_number_mismatch(self):
+        lines = list(VALID_LINES)
+        lines[lines.index("圖1為測試裝置的立體圖。")] = (
+            "圖7是沿著圖3中之線VI-VI所取得的一剖視圖。"
+        )
+        issues = [
+            issue
+            for issue in review_document(
+                build_document(lines),
+                ocr_results=[{"figure_numbers": [3], "numbers": ["VI"]}],
+            ).issues
+            if issue.rule_id == "OCR002"
+        ]
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details["reason"], "target_mismatch")
+        self.assertIn("換算後是6", issues[0].message)
+
+    def test_cross_section_rule_reports_missing_roman_on_source_figure(self):
+        lines = list(VALID_LINES)
+        lines[lines.index("圖1為測試裝置的立體圖。")] = (
+            "圖6是沿著圖3中之線VI-VI所取得的一剖視圖。"
+        )
+        issues = [
+            issue
+            for issue in review_document(
+                build_document(lines),
+                ocr_results=[{"figure_numbers": [3], "numbers": ["V", "10"]}],
+            ).issues
+            if issue.rule_id == "OCR002"
+        ]
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details["reason"], "roman_not_detected")
+        self.assertIn("沒有偵測到「VI」", issues[0].message)
+
+    def test_all_loaded_figures_must_be_used_by_document(self):
+        lines = list(VALID_LINES)
+        embodiment_index = lines.index("【實施方式】") + 1
+        lines[embodiment_index] = "參閱圖2，主箱體10形成測試裝置。"
+        document = build_document(lines)
+        ocr_results = [
+            {"figure_numbers": [1], "numbers": ["10"]},
+            {"figure_numbers": [2], "numbers": ["10"]},
+            {"figure_numbers": ["3A"], "numbers": ["20"]},
+        ]
+
+        unused = find_unused_ocr_figures(document, ocr_results)
+        self.assertEqual([item.figure for item in unused], ["3A"])
+        issues = [
+            issue
+            for issue in review_document(document, ocr_results=ocr_results).issues
+            if issue.rule_id == "OCR003"
+        ]
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].details["unused_figure"], "3A")
+        self.assertIn("全文沒有引用", issues[0].message)
 
 
 if __name__ == "__main__":

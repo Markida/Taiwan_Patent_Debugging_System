@@ -9,13 +9,13 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
-from app.main_window import MainWindow
 from app.paths import get_app_icon_path
-from features.patent_ocr.offline_self_test import run_offline_self_test
 
 
 def main():
     if "--offline-self-test" in sys.argv:
+        from features.patent_ocr.offline_self_test import run_offline_self_test
+
         argument_index = sys.argv.index("--offline-self-test")
         report_path = (
             sys.argv[argument_index + 1]
@@ -33,8 +33,20 @@ def main():
     if icon_path.is_file():
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    window = MainWindow()
+    # Show feedback before importing feature pages.  Those modules include the
+    # OCR/PDF stack and are the most noticeable part of cold startup.
+    from app.startup_splash import StartupSplash
+
+    splash = StartupSplash()
+    splash.show()
+    splash.set_status("正在載入應用程式模組")
+
+    from app.main_window import MainWindow
+
+    window = MainWindow(startup_progress_callback=splash.set_status)
     window.show()
+    app.processEvents()
+    QTimer.singleShot(180, lambda: splash.finish(window))
 
     if "--gui-smoke-test" in sys.argv:
         QTimer.singleShot(1500, app.quit)

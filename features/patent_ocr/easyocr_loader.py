@@ -1,7 +1,17 @@
+from functools import lru_cache
 from pathlib import Path
 
 from app.paths import get_easyocr_model_dir
 from features.patent_ocr.compact_ocr_reader import CompactEnglishReader
+
+
+@lru_cache(maxsize=2)
+def _create_easyocr_reader_cached(model_path_text, modified_ns, size_bytes, ocr_gpu):
+    del modified_ns, size_bytes
+    return CompactEnglishReader(
+        Path(model_path_text),
+        gpu=ocr_gpu,
+    )
 
 
 def create_easyocr_reader(ocr_gpu):
@@ -38,9 +48,17 @@ def create_easyocr_reader(ocr_gpu):
             f"複製缺少的 .pth 檔案到 easyocr_models。"
         )
 
-    reader = CompactEnglishReader(
-        easyocr_model_dir / "english_g2.pth",
-        gpu=ocr_gpu,
+    model_path = (easyocr_model_dir / "english_g2.pth").resolve()
+    stat = model_path.stat()
+    return _create_easyocr_reader_cached(
+        str(model_path),
+        stat.st_mtime_ns,
+        stat.st_size,
+        bool(ocr_gpu),
     )
 
-    return reader
+
+def clear_easyocr_reader_cache():
+    """Release the recognizer cache for tests or explicit maintenance."""
+
+    _create_easyocr_reader_cached.cache_clear()

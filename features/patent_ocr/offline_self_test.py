@@ -12,7 +12,10 @@ import torch
 
 from app.paths import get_easyocr_model_dir, get_models_dir
 from features.patent_ocr.easyocr_loader import create_easyocr_reader
+from features.patent_ocr.figure_heading import is_figure_heading_model
+from features.patent_ocr.figure_heading_classes import FIGURE_HEADING_CLASS_NAMES
 from features.patent_ocr.model_loader import load_detection_model
+from features.patent_ocr.ocr_worker import resolve_figure_heading_model_path
 
 
 def _write_report(path, report):
@@ -29,6 +32,7 @@ def run_offline_self_test(report_path=None):
         or (Path(tempfile.gettempdir()) / "Saint-IslandPatentOCR_offline_check.json")
     )
     model_candidates = [
+        get_models_dir() / "patent_label_group_v2_gold_ft.onnx",
         get_models_dir() / "patent_char_v4_company_approved_recall.onnx",
         get_models_dir() / "patent_char_v3_consensus.onnx",
         get_models_dir() / "patent_label_group_v1.onnx",
@@ -38,11 +42,15 @@ def run_offline_self_test(report_path=None):
         model_candidates[0],
     )
     ocr_path = get_easyocr_model_dir() / "english_g2.pth"
+    heading_model_path = resolve_figure_heading_model_path(model_path)
     report = {
         "status": "FAILED",
         "torch": torch.__version__,
         "model": str(model_path),
         "ocr_model": str(ocr_path),
+        "figure_heading_model": (
+            str(heading_model_path) if heading_model_path is not None else None
+        ),
     }
 
     try:
@@ -51,9 +59,16 @@ def run_offline_self_test(report_path=None):
         detector = load_detection_model(model_path)
         model_names = getattr(detector, "names", {})
         is_character_model = len(model_names) in {37, 63}
-        if not is_character_model and not ocr_path.exists():
+        needs_english_reader = (
+            not is_character_model or heading_model_path is not None
+        )
+        if needs_english_reader and not ocr_path.exists():
             raise FileNotFoundError(f"缺少 OCR 模型：{ocr_path}")
-        reader = None if is_character_model else create_easyocr_reader(False)
+        reader = (
+            create_easyocr_reader(False)
+            if needs_english_reader
+            else None
+        )
 
         with tempfile.TemporaryDirectory(prefix="Saint-IslandPatentOCR_check_") as folder:
             image_path = Path(folder) / "runtime_test.png"
@@ -79,6 +94,22 @@ def run_offline_self_test(report_path=None):
                 device="cpu",
                 verbose=False,
             )
+            heading_detector = None
+            if heading_model_path is not None:
+                heading_detector = load_detection_model(heading_model_path)
+                if not is_figure_heading_model(heading_detector):
+                    raise RuntimeError(
+                        "圖題模型類別必須依序為："
+                        + "、".join(FIGURE_HEADING_CLASS_NAMES)
+                    )
+                heading_detector.predict(
+                    source=str(image_path),
+                    imgsz=1536,
+                    conf=0.15,
+                    iou=0.3,
+                    device="cpu",
+                    verbose=False,
+                )
             if reader is not None:
                 grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
                 reader.recognize(
@@ -97,6 +128,7 @@ def run_offline_self_test(report_path=None):
                 "dummy_detections": len(detections[0].boxes),
                 "model_class_count": len(model_names),
                 "easyocr_checked": reader is not None,
+                "figure_heading_model_checked": heading_detector is not None,
             }
         )
         _write_report(report_path, report)

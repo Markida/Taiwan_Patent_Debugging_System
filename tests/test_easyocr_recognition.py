@@ -13,6 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from features.patent_ocr.ocr_engine import (  # noqa: E402
     filter_small_j_detections,
+    filter_small_zero_detections,
+    suppress_nested_label_detections,
     meets_character_confidence,
     meets_label_confidence,
     count_roman_i_strokes,
@@ -284,6 +286,30 @@ class EasyOcrCharacterTests(unittest.TestCase):
             rejected[0]["rejection_reason"],
             "j_smaller_than_numeric_labels",
         )
+
+    def test_raises_zero_threshold_and_filters_only_small_standalone_zero(self):
+        self.assertFalse(
+            meets_character_confidence(
+                "0", 0.14, min_confidence=0.05,
+                character_minimums=V3_CHARACTER_MIN_CONFIDENCE,
+            )
+        )
+        accepted, rejected = filter_small_zero_detections([
+            {"label": "212", "x1": 0, "y1": 0, "x2": 50, "y2": 40},
+            {"label": "0", "x1": 60, "y1": 10, "x2": 72, "y2": 25},
+            {"label": "10", "x1": 80, "y1": 0, "x2": 112, "y2": 41},
+        ])
+        self.assertEqual([item["label"] for item in accepted], ["212", "10"])
+        self.assertEqual(rejected[0]["rejection_reason"], "zero_smaller_than_numeric_labels")
+
+    def test_nested_duplicate_keeps_complete_212_and_drops_final_2(self):
+        accepted, rejected = suppress_nested_label_detections([
+            {"label": "212", "x1": 10, "y1": 10, "x2": 70, "y2": 50, "confidence": 0.8},
+            {"label": "2", "x1": 51, "y1": 12, "x2": 68, "y2": 48, "confidence": 0.9},
+            {"label": "2", "x1": 100, "y1": 10, "x2": 117, "y2": 48, "confidence": 0.9},
+        ])
+        self.assertEqual([item["label"] for item in accepted], ["212", "2"])
+        self.assertEqual(rejected[0]["rejection_reason"], "nested_duplicate_label")
 
 
 if __name__ == "__main__":

@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence
 
-from features.patent_review.models import PatentDocument
-from features.patent_review.symbol_transfer import DocumentSymbolTransfer
+if TYPE_CHECKING:
+    from features.patent_review.models import PatentDocument
+    from features.patent_review.symbol_transfer import DocumentSymbolTransfer
 
 
-SymbolTransferCallback = Callable[[DocumentSymbolTransfer], None]
+SymbolTransferCallback = Callable[["DocumentSymbolTransfer"], None]
 OcrResultsCallback = Callable[[List[Dict[str, object]]], None]
-DocumentCallback = Callable[[Optional[PatentDocument]], None]
+DocumentCallback = Callable[[Optional["PatentDocument"]], None]
 
 
 class PatentWorkflowContext:

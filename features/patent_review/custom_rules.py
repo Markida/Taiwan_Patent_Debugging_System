@@ -9,11 +9,16 @@ from pathlib import Path
 import unicodedata
 from typing import Iterable, List, Optional, Tuple
 
-from app.paths import get_app_install_dir
+from app.paths import get_user_data_dir
 
 
 CUSTOM_TEXT_RULES_FILENAME = "custom_text_rules.json"
+DOCUMENT_SIMILARITY_WHITELISTS_FILENAME = "document_similarity_whitelists.json"
+SHARED_CUSTOM_TEXT_RULES_DIRECTORY = Path(
+    r"C:\Documents"
+)
 CUSTOM_TEXT_RULES_SCHEMA_VERSION = 2
+DOCUMENT_SIMILARITY_WHITELISTS_SCHEMA_VERSION = 1
 MAX_CUSTOM_RULE_LENGTH = 80
 CUSTOM_RULE_BLACKLIST = "blacklist"
 CUSTOM_RULE_WHITELIST = "whitelist"
@@ -87,7 +92,8 @@ class CustomTextRuleStore:
 
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(
-            path or (get_app_install_dir() / CUSTOM_TEXT_RULES_FILENAME)
+            path
+            or (SHARED_CUSTOM_TEXT_RULES_DIRECTORY / CUSTOM_TEXT_RULES_FILENAME)
         )
 
     def load(self) -> List[CustomTextRule]:
@@ -182,4 +188,159 @@ class CustomTextRuleStore:
         removed = len(rules) - len(remaining)
         if removed:
             self.save(remaining)
+        return removed
+
+
+class DocumentSimilarityWhitelistStore:
+    """Persist per-document exemptions in each Windows user's local profile."""
+
+    def __init__(self, path: Optional[Path] = None):
+        self.path = Path(
+            path
+            or (
+                get_user_data_dir()
+                / DOCUMENT_SIMILARITY_WHITELISTS_FILENAME
+            )
+        )
+
+    @staticmethod
+    def document_key(document) -> str:
+        source_path = str(getattr(document, "source_path", "") or "").strip()
+        if source_path:
+            try:
+                source_path = str(Path(source_path).resolve(strict=False))
+            except OSError:
+                pass
+            return "path:" + unicodedata.normalize("NFKC", source_path).casefold()
+        sha256 = str(getattr(document, "sha256", "") or "").strip().lower()
+        if sha256:
+            return "sha256:" + sha256
+        file_name = str(getattr(document, "file_name", "") or "").strip()
+        return "file:" + unicodedata.normalize("NFKC", file_name).casefold()
+
+    @staticmethod
+    def _document_identity(document) -> dict:
+        return {
+            "key": DocumentSimilarityWhitelistStore.document_key(document),
+            "source_path": str(getattr(document, "source_path", "") or ""),
+            "file_name": str(getattr(document, "file_name", "") or ""),
+            "sha256": str(getattr(document, "sha256", "") or "").lower(),
+        }
+
+    def _load_payload(self) -> dict:
+        if not self.path.exists():
+            return {
+                "schema_version": DOCUMENT_SIMILARITY_WHITELISTS_SCHEMA_VERSION,
+                "documents": [],
+            }
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise CustomRuleStorageError(
+                f"無法讀取文件專用白名單：{self.path}\n{error}"
+            ) from error
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("documents"), list
+        ):
+            raise CustomRuleStorageError(
+                f"文件專用白名單格式不正確：{self.path}"
+            )
+        return payload
+
+    def _save_payload(self, payload: dict) -> None:
+        normalized_payload = {
+            "schema_version": DOCUMENT_SIMILARITY_WHITELISTS_SCHEMA_VERSION,
+            "documents": payload.get("documents", []),
+        }
+        temporary_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path.write_text(
+                json.dumps(normalized_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary_path.replace(self.path)
+        except OSError as error:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise CustomRuleStorageError(
+                f"無法儲存文件專用白名單：{self.path}\n{error}"
+            ) from error
+
+    def _matching_record(self, payload: dict, document):
+        identity = self._document_identity(document)
+        documents = payload["documents"]
+        for record in documents:
+            if isinstance(record, dict) and record.get("key") == identity["key"]:
+                return record
+        sha256 = identity["sha256"]
+        if sha256:
+            for record in documents:
+                if isinstance(record, dict) and record.get("sha256") == sha256:
+                    return record
+        return None
+
+    def load(self, document) -> List[str]:
+        payload = self._load_payload()
+        record = self._matching_record(payload, document)
+        if record is None:
+            return []
+        values = record.get("terms", [])
+        if not isinstance(values, list):
+            raise CustomRuleStorageError(
+                f"文件專用白名單包含無效內容：{self.path}"
+            )
+        terms: List[str] = []
+        seen = set()
+        try:
+            for value in values:
+                term = normalize_custom_rule_text(value)
+                if term not in seen:
+                    seen.add(term)
+                    terms.append(term)
+        except CustomRuleValidationError as error:
+            raise CustomRuleStorageError(
+                f"文件專用白名單包含無效內容：{self.path}\n{error}"
+            ) from error
+        return terms
+
+    def save(self, document, terms: Iterable[object]) -> None:
+        normalized_terms: List[str] = []
+        seen = set()
+        for value in terms:
+            term = normalize_custom_rule_text(value)
+            if term not in seen:
+                seen.add(term)
+                normalized_terms.append(term)
+        payload = self._load_payload()
+        record = self._matching_record(payload, document)
+        identity = self._document_identity(document)
+        if record is None:
+            record = {}
+            payload["documents"].append(record)
+        record.update(identity)
+        record["terms"] = normalized_terms
+        self._save_payload(payload)
+
+    def add(self, document, value: object) -> Tuple[str, bool]:
+        term = normalize_custom_rule_text(value)
+        terms = self.load(document)
+        if term in terms:
+            return term, False
+        terms.append(term)
+        self.save(document, terms)
+        return term, True
+
+    def remove(self, document, values: Iterable[object]) -> int:
+        selected = {
+            normalize_custom_rule_text(value)
+            for value in values
+        }
+        terms = self.load(document)
+        remaining = [term for term in terms if term not in selected]
+        removed = len(terms) - len(remaining)
+        if removed:
+            self.save(document, remaining)
         return removed

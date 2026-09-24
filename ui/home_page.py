@@ -87,13 +87,6 @@ class HomePage(QWidget):
 
             card_layout.addWidget(button)
 
-        placeholder_button = QPushButton("更多功能即將加入")
-        placeholder_button.setObjectName("DisabledHomeButton")
-        placeholder_button.setMinimumHeight(46)
-        placeholder_button.setEnabled(False)
-
-        card_layout.addWidget(placeholder_button)
-
         card.setLayout(card_layout)
 
         layout.addStretch()

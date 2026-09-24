@@ -16,7 +16,10 @@ from training.char_yolo.char_classes import (  # noqa: E402
     normalize_character,
 )
 from features.patent_ocr.ocr_engine import group_chars_to_labels  # noqa: E402
-from features.patent_ocr.label_parser import normalize_label_text  # noqa: E402
+from features.patent_ocr.label_parser import (  # noqa: E402
+    normalize_label_text,
+    parse_reference_items,
+)
 
 
 def char_item(character, x1, y1, x2, y2):
@@ -43,10 +46,20 @@ class CharacterClassTests(unittest.TestCase):
 
 
 class CharacterGroupingTests(unittest.TestCase):
-    def test_prime_is_only_kept_as_numeric_suffix(self):
+    def test_prime_is_kept_as_alphanumeric_suffix(self):
         self.assertEqual(normalize_label_text("55'"), "55'")
         self.assertEqual(normalize_label_text("'42"), "42")
-        self.assertEqual(normalize_label_text("X'"), "X")
+        for label in ("A'", "B'", "C'", "S1'", "a'", "b'", "c'"):
+            self.assertEqual(normalize_label_text(label), label)
+
+    def test_reference_list_accepts_letter_and_mixed_prime_labels(self):
+        items = parse_reference_items(
+            "3':第三元件\n17′:第十七元件\nA’:大寫\nS1':混合\na':小寫"
+        )
+        self.assertEqual(
+            [item["number"] for item in items],
+            ["3'", "17'", "A'", "S1'", "a'"],
+        )
 
     def test_preserves_uppercase_and_lowercase_as_distinct_labels(self):
         self.assertEqual(normalize_label_text("10A"), "10A")
@@ -77,6 +90,26 @@ class CharacterGroupingTests(unittest.TestCase):
         ]
         results = group_chars_to_labels(items)
         self.assertEqual([item["label"] for item in results], ["7'"])
+
+    def test_attaches_prime_to_letter_and_mixed_labels(self):
+        letter_items = [
+            char_item("A", 10, 20, 28, 44),
+            char_item("'", 27, 10, 33, 22),
+        ]
+        mixed_items = [
+            char_item("S", 10, 20, 28, 44),
+            char_item("1", 30, 20, 42, 44),
+            char_item("'", 41, 10, 47, 22),
+        ]
+
+        self.assertEqual(
+            [item["label"] for item in group_chars_to_labels(letter_items)],
+            ["A'"],
+        )
+        self.assertEqual(
+            [item["label"] for item in group_chars_to_labels(mixed_items)],
+            ["S1'"],
+        )
 
     def test_supports_multiple_prime_labels(self):
         items = [

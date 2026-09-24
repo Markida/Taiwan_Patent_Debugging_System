@@ -9,6 +9,11 @@ import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from features.patent_ocr.figure_heading_classes import (
+    FIGURE_HEADING_CLASS_NAMES,
+    FIGURE_PREFIX_ROTATE_RIGHT_CLASS,
+)
+
 
 BASE_CLASS_NAMES = tuple("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") + ("prime",)
 CLASS_NAMES = BASE_CLASS_NAMES
@@ -19,6 +24,8 @@ CLASS_TO_ID = {name: index for index, name in enumerate(CLASS_NAMES)}
 def normalize_label(value):
     text = str(value or "").strip()
 
+    if text in FIGURE_HEADING_CLASS_NAMES:
+        return text
     if text in {"'", "′", "’", "`"} or text.upper() == "PRIME":
         return "prime"
     if len(text) == 1 and text in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
@@ -27,7 +34,13 @@ def normalize_label(value):
 
 
 def display_label(value):
-    return "'" if value == "prime" else str(value or "")
+    labels = {
+        "prime": "'",
+        "figure_prefix": "圖",
+        "figure_identifier": "圖號",
+        FIGURE_PREFIX_ROTATE_RIGHT_CLASS: "橫著的圖（右旋90°）",
+    }
+    return labels.get(value, str(value or ""))
 
 
 def stable_split(source_key, val_ratio=0.2):
@@ -58,6 +71,9 @@ class Annotation:
     x2: float
     y2: float
     source: str = "manual"
+    text: str = ""
+    seed_text: str = ""
+    pair_id: str = ""
 
     def normalized(self, image_width, image_height):
         x1 = max(0.0, min(float(image_width), min(self.x1, self.x2)))
@@ -71,6 +87,9 @@ class Annotation:
             x2=x2,
             y2=y2,
             source=self.source,
+            text=str(self.text or "").strip(),
+            seed_text=str(self.seed_text or "").strip(),
+            pair_id=str(self.pair_id or "").strip(),
         )
 
     def is_valid(self, image_width, image_height, min_size=2.0):

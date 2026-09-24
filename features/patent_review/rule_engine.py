@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
 import re
 import unicodedata
@@ -50,21 +51,21 @@ RULE_CATALOG: Tuple[RuleDefinition, ...] = (
         "說明書段落缺少段號",
         "paragraph_numbering",
         "error",
-        "說明書正文必須使用 Word 自動產生的四位數連續段號。",
+        "說明書正文必須使用 Word 自動產生的連續段號。",
     ),
     RuleDefinition(
         "PNO002",
         "說明書段號格式異常",
         "paragraph_numbering",
         "error",
-        "說明書段號必須顯示為「【0001】」格式。",
+        "說明書段號可顯示為「【1】」或「【0001】」等一至四位數格式。",
     ),
     RuleDefinition(
         "PNO003",
         "說明書段號不連續",
         "paragraph_numbering",
         "error",
-        "說明書正文段號應由0001開始，依文件順序連續編排。",
+        "說明書正文段號應由1開始，依文件順序連續編排；是否補零不影響段號值。",
     ),
     RuleDefinition(
         "ORD001",
@@ -144,6 +145,20 @@ RULE_CATALOG: Tuple[RuleDefinition, ...] = (
         "將全文中與符號說明元件名稱僅差一個中文字的詞列為可能的輸入錯誤。",
     ),
     RuleDefinition(
+        "REF006",
+        "完整標的名稱中誤插元件標號",
+        "references",
+        "error",
+        "完整發明／新型名稱必須保持連續，不得在其中的元件名稱後插入符號說明標號。",
+    ),
+    RuleDefinition(
+        "REF007",
+        "實施方式段落參閱圖式過多",
+        "references",
+        "error",
+        "實施方式的單一段落最多可參閱四張不同圖式；圖號範圍會展開後計算。",
+    ),
+    RuleDefinition(
         "CLM001",
         "請求項缺少明確編號",
         "claims",
@@ -199,30 +214,39 @@ RULE_CATALOG += (
     RuleDefinition("STR005", "三大章節缺漏或順序錯誤", "structure", "error", "摘要、說明書及申請專利範圍必須各出現一次並依固定順序排列。"),
     RuleDefinition("STR006", "中型章節位置或順序錯誤", "structure", "error", "中型章節必須位於正確的大章節並依固定順序排列。"),
     RuleDefinition("STR007", "不允許的中括號標題", "structure", "error", "正式文件不得加入固定清單以外的中括號章節。"),
-    RuleDefinition("STR009", "大章節缺少下一頁分節符號", "structure", "error", "說明書及申請專利範圍必須以真正的 Word 下一頁分節符號開始。"),
+    RuleDefinition("STR009", "大章節分節符號（選用）", "structure", "info", "大章節可使用下一頁分節符號，但未使用時不列為錯誤。"),
     RuleDefinition("STR010", "章節名稱文字不符", "structure", "error", "忽略括號、空白及字型後，章節名稱文字仍須與所屬專利類型相符。"),
     RuleDefinition("FMT004", "頁面設定不符", "formatting", "error", "頁面大小、邊界及頁首頁尾距離必須符合正式範本。"),
     RuleDefinition("TTL001", "中文名稱前後不一致", "titles", "error", "摘要與說明書的中文名稱必須逐字完全相同。"),
     RuleDefinition("TTL002", "英文名稱出現位置或內容不一致", "titles", "error", "英文名稱為選填，但必須兩處同時存在且逐字相同。"),
     RuleDefinition("PNO004", "手動輸入說明書段號", "paragraph_numbering", "error", "說明書段號不得直接鍵入本文，必須使用 Word 自動編號。"),
     RuleDefinition("PNO005", "空的說明書段號", "paragraph_numbering", "error", "具有說明書段號的段落必須有正文內容。"),
-    RuleDefinition("PNO006", "段號出現在不允許的位置", "paragraph_numbering", "error", "四位數說明書段號只能出現在發明／新型說明書。"),
+    RuleDefinition("PNO006", "段號出現在不允許的位置", "paragraph_numbering", "error", "說明書段號只能出現在發明／新型說明書。"),
     RuleDefinition("FIG003", "圖說未使用獨立段落", "drawings", "error", "每個主要圖號必須位於獨立 Word 段落且每段只能有一個行首主要圖號。"),
     RuleDefinition("SYM006", "符號項目重複", "symbols", "error", "同一份符號說明不得重複列出相同符號。"),
     RuleDefinition("REF003", "發明與新型用語混用", "references", "error", "發明與新型文件必須使用對應的固定用語。"),
     RuleDefinition("CLM006", "請求項不是 Word 自動編號", "claims", "error", "請求項編號不得手動鍵入。"),
     RuleDefinition("CLM007", "空白請求項", "claims", "error", "每個請求項都必須具有實質文字內容。"),
     RuleDefinition("CLM008", "請求項使用權利要求用語", "claims", "error", "附屬項應使用申請專利範圍或請求項用語。"),
-    RuleDefinition("CLM009", "請求項不是單一句", "claims", "error", "一個請求項原則上應以一個完整句號結束。"),
+    RuleDefinition("CLM009", "請求項句號數量或位置錯誤", "claims", "error", "同一請求項只能出現一個全形句號「。」，且必須位於句尾；換行或跨 Word 段落仍合併計算。"),
     RuleDefinition("CLM011", "附屬項標的名稱不一致", "claims", "warning", "附屬項標的名稱應與其依附請求項一致。"),
-    RuleDefinition("CLM012", "構件先行基礎或單複數不符", "claims", "error", "構件第一次出現須有數量詞；後續單數使用「該」、複數使用「該等」。"),
+    RuleDefinition(
+        "CLM012",
+        "構件先行基礎或單複數不符",
+        "claims",
+        "error",
+        "構件第一次出現須有數量詞；後續單數使用「該」、複數使用「該等」；「對應的該A」仍屬單數指稱。",
+    ),
     RuleDefinition("CLM013", "主要構件缺少關係敘述", "claims", "warning", "獨立項的主要構件間應記載連結、位置或對應關係。"),
     RuleDefinition("CLM014", "名稱與請求項標的不一致", "claims", "warning", "中文發明／新型名稱應與獨立項標的名稱相符。"),
     RuleDefinition("CLM015", "請求項內容無法可靠判別", "claims", "warning", "系統無法可靠拆解此請求項，必須人工確認。"),
     RuleDefinition("CLM016", "構件缺少先行揭露", "claims", "error", "請求項使用「該」、「該等」或其成員指稱前，前文或依附項必須先建立該構件。"),
     RuleDefinition("CLM017", "獨立項分行結尾標點錯誤", "claims", "error", "跨行獨立項的第一行應以全形冒號結尾，中間各行應以全形分號結尾，倒數第二行應以「；及」結尾。"),
+    RuleDefinition("CLM018", "重複請求項提醒", "claims", "warning", "不同請求項的完整內文在忽略自身項次、排版空白與等價全半形標點後完全相同時，合併提醒人工確認；不推論法律上的權利範圍是否相同。"),
+    RuleDefinition("CLM019", "請求項1與發明／新型內容對應提醒", "claims", "warning", "逐項查找請求項1在發明／新型內容的文字與有限結構對應證據；疑似遺漏或不一致列為警告，無法可靠解析列為資訊待確認，不直接判斷法律支持性。"),
+    RuleDefinition("ABS001", "中文摘要字數提醒", "abstract", "warning", "中文摘要以 250 字為原則；分別提供非空白字元數與中英文字數估計，僅因計數口徑可能超過時列為資訊提醒。"),
     RuleDefinition("PCT001", "中文摘要結尾標點錯誤", "punctuation", "error", "發明／新型摘要的中文段落必須以全形句號結尾。"),
-    RuleDefinition("PCT002", "說明書段落結尾標點錯誤", "punctuation", "error", "發明／新型說明書的數字段落必須以全形句號結尾；圖式簡單說明與符號說明另依各自規則處理。"),
+    RuleDefinition("PCT002", "說明書段落結尾標點錯誤", "punctuation", "error", "發明／新型說明書的數字段落原則上以全形句號結尾；實施方式非末段可用冒號引出下段，表格、圖式簡單說明與符號說明另行處理。"),
     RuleDefinition("PCT003", "圖式簡單說明導言結尾標點錯誤", "punctuation", "error", "圖式簡單說明的導言必須以全形冒號結尾。"),
     RuleDefinition("PCT004", "圖式簡單說明圖說結尾標點錯誤", "punctuation", "error", "各圖說中間以全形分號結尾，倒數第二圖以「；及」結尾，最後一圖以全形句號結尾。"),
     RuleDefinition("TXT003", "原住民族相關用語", "typography", "info", "偵測到相關用語時提示人工確認，不直接判定內容錯誤。"),
@@ -234,6 +258,20 @@ RULE_CATALOG += (
         "drawing_ocr",
         "error",
         "OCR 已完成時，實施方式段落出現的標號必須能在其參閱圖式中找到；圖式額外出現的標號不偵錯。",
+    ),
+    RuleDefinition(
+        "OCR002",
+        "剖視圖與羅馬剖切線不一致",
+        "drawing_ocr",
+        "error",
+        "圖式簡單說明記載剖視／剖面關係時，來源圖必須偵測到對應羅馬剖切線，且羅馬數字換算後須與剖視圖圖號一致。",
+    ),
+    RuleDefinition(
+        "OCR003",
+        "圖式未被文件使用",
+        "drawing_ocr",
+        "error",
+        "每張已載入 OCR 的圖式，至少必須在全文的引用、參閱文字或圖式簡單說明中出現一次。",
     ),
 )
 
@@ -280,7 +318,7 @@ _CLAIM_AS_DESCRIBED = re.compile(
 _PARAGRAPH_NUMBER = re.compile(
     r"^\s*(?P<display>[【〖\[]\s*(?P<number>\d+)\s*[】〗\]])"
 )
-_VALID_PARAGRAPH_NUMBER = re.compile(r"^【\d{4}】$")
+_VALID_PARAGRAPH_NUMBER = re.compile(r"^【\d{1,4}】$")
 _NARRATIVE_SECTIONS = {
     "technical_field",
     "background_art",
@@ -317,19 +355,26 @@ _COMPONENT_NAME_SUFFIXES = (
 )
 _COMPONENT_QUANTIFIER_EXPRESSION = (
     r"至少(?:一|[二三四五六七八九十百兩]+)|"
-    r"數個|多個|複數|[一二三四五六七八九十百兩]+"
+    r"以下|下列|幾個|數個|多個|複數|[一二三四五六七八九十百兩]+"
 )
+_CLAIM_QUANTITY_EXEMPT_COMPONENT_NAMES = frozenset({"步驟"})
 _QUANTIFIED_AS_DESCRIBED_TARGET = re.compile(
     rf"^(?P<quantity>{_COMPONENT_QUANTIFIER_EXPRESSION})"
     r"如(?P<citation>[^。；;\r\n]{1,240}?)所述(?:的|之)?"
     r"(?P<subject>[\u3400-\u9fffA-Za-z0-9]+?)"
     r"(?=\s*(?:，|,|；|;|：|:|。|包含|包括|具有|其特徵|$))"
 )
-# Temporarily accept a singular reference after a component was disclosed as
-# plural or as a specified multiple.  Keep this switch explicit so the strict
-# diagnostic can be restored later without rebuilding the quantity parser.
-_SUSPEND_SINGULAR_REFERENCE_AFTER_PLURAL_CHECK = True
-_COMPONENT_DISTRIBUTIVE_REFERENCES = ("每一該", "各自該", "各該")
+# Singular references to a component disclosed as plural are errors except
+# inside the existing distributive/member scopes (for example「每一該送料輥的
+# 該輥本體」).  Keeping the strict path enabled prevents a plain「該元件」from
+# silently collapsing a plural set to one unspecified member.
+_SUSPEND_SINGULAR_REFERENCE_AFTER_PLURAL_CHECK = False
+_COMPONENT_DISTRIBUTIVE_REFERENCES = (
+    "各自的該",
+    "每一該",
+    "各自該",
+    "各該",
+)
 _COMPONENT_SINGULAR_SELECTION_REFERENCES = (
     "其中任一該",
     "其中一該",
@@ -681,19 +726,8 @@ def _formal_structure_issues(document: PatentDocument) -> Iterable[PatentIssue]:
             details={"actual_order": actual_major_order},
         )
 
-    for major in selected_majors[1:]:
-        heading = paragraph_map.get(major.heading_paragraph_index)
-        previous = paragraph_map.get(major.heading_paragraph_index - 1)
-        if previous is not None and previous.section_break_type == "nextPage":
-            continue
-        yield _issue(
-            "STR009",
-            f"「{heading.text if heading else major.title}」前方沒有 Word 下一頁分節符號。",
-            "請使用版面配置中的下一頁分節符號，不要以空白段落代替。",
-            paragraph=heading,
-            start=0 if heading else None,
-            end=len(heading.text) if heading else None,
-        )
+    # The three major sections are ordered by their heading text. A Word
+    # next-page section break remains permitted but is no longer mandatory.
 
     sections_by_major: Dict[str, List[object]] = defaultdict(list)
     for section in document.sections:
@@ -996,8 +1030,8 @@ def _paragraph_number_issues(
             if not _VALID_PARAGRAPH_NUMBER.fullmatch(display):
                 yield _issue(
                     "PNO002",
-                    f"段號顯示為「{display}」，不是固定的「【0001】」格式。",
-                    f"請確認 Word 段號格式是否應為「【{value:04d}】」。",
+                    f"段號顯示為「{display}」，不是合法的「【1】」至「【9999】」格式。",
+                    f"請確認 Word 段號是否使用全形方括號；可顯示為「【{value}】」或「【{value:04d}】」。",
                     paragraph=paragraph,
                     start=0,
                     end=min(len(paragraph.text), 36),
@@ -1018,7 +1052,7 @@ def _paragraph_number_issues(
         yield _issue(
             "PNO001",
             f"「{paragraph.section_title}」的正文段落缺少可辨識段號。",
-            "請回到 Word 將此段設為說明書的四位數連續編號清單。",
+            "請回到 Word 將此段設為說明書的連續編號清單；段號可選擇是否補零。",
             paragraph=paragraph,
             start=0,
             end=min(len(paragraph.text), 36),
@@ -1032,8 +1066,8 @@ def _paragraph_number_issues(
         explicit = _PARAGRAPH_NUMBER.match(paragraph.text)
         yield _issue(
             "PNO003",
-            f"此段為「{display or value}」，依文件順序預期應為「【{expected:04d}】」。",
-            "請檢查前後段落的 Word 自動編號，並由0001起連續編排。",
+            f"此段為「{display or value}」，依文件順序預期段號值應為「{expected}」。",
+            "請檢查前後段落的 Word 自動編號，並由1起連續編排；是否補零不影響順序。",
             paragraph=paragraph,
             start=0,
             end=min(len(paragraph.text), 36),
@@ -1098,6 +1132,74 @@ def _ending_highlight_span(paragraph: PatentParagraph) -> Tuple[int, int]:
     return max(0, visible_end - 3), visible_end
 
 
+_ABSTRACT_HAN = re.compile(
+    r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af]"
+)
+_ABSTRACT_WORD = re.compile(r"[^\W_]+(?:['’′-][^\W_]+)*", re.UNICODE)
+
+
+def _abstract_length_issues(document: PatentDocument) -> Iterable[PatentIssue]:
+    """Count Chinese abstract content only, with an explicit estimate boundary."""
+
+    paragraph_map = _paragraph_by_index(document)
+    for section in document.sections:
+        if section.key != "abstract_zh":
+            continue
+        contents: List[Tuple[PatentParagraph, str]] = []
+        for index in section.paragraph_indices:
+            paragraph = paragraph_map.get(index)
+            if paragraph is None:
+                continue
+            # A heading-only paragraph must never contribute its title.
+            content = (
+                paragraph.content_text.strip()
+                if paragraph.is_heading
+                else paragraph.text.strip()
+            )
+            if content:
+                contents.append((paragraph, content))
+        if not contents:
+            continue
+        text = "\n".join(content for _paragraph, content in contents)
+        non_whitespace_count = sum(not char.isspace() for char in text)
+        if non_whitespace_count <= 250:
+            continue
+        estimated_word_count = len(_ABSTRACT_HAN.findall(text)) + len(
+            _ABSTRACT_WORD.findall(_ABSTRACT_HAN.sub(" ", text))
+        )
+        over_estimate = estimated_word_count > 250
+        paragraph = contents[0][0]
+        issue = _issue(
+            "ABS001",
+            (
+                f"中文摘要估計 {estimated_word_count} 字，超過 250 字原則"
+                f"（非空白字元共 {non_whitespace_count} 個）。"
+                if over_estimate
+                else f"中文摘要非空白字元共 {non_whitespace_count} 個，"
+                f"中英文字數估計 {estimated_word_count} 字；"
+                "依計數口徑可能超過 250 字，請人工確認。"
+            ),
+            "請確認摘要是否需精簡。估計方式：每個中文字計一字，連續英文／數字詞計一字，"
+            "不計標點與空白；非空白字元數則包含標點。此為輔助提醒，非官方計數結果。",
+            paragraph=paragraph,
+            section_key=section.key,
+            section_title=section.title,
+            start=0,
+            end=len(paragraph.text),
+            details={
+                "limit": 250,
+                "non_whitespace_count": non_whitespace_count,
+                "estimated_word_count": estimated_word_count,
+                "paragraph_indices": [item.index for item, _text in contents],
+                "counting_method": "han_characters_plus_alphanumeric_words",
+                "manual_count_confirmation": not over_estimate,
+            },
+        )
+        if not over_estimate:
+            issue.severity = "info"
+        yield issue
+
+
 def _ending_punctuation_issues(
     document: PatentDocument,
 ) -> Iterable[PatentIssue]:
@@ -1132,6 +1234,19 @@ def _ending_punctuation_issues(
             details={"expected_ending": "。"},
         )
 
+    embodiment_content_indices = [
+        paragraph.index
+        for paragraph in document.paragraphs
+        if paragraph.section_key == "embodiments"
+        and not paragraph.is_heading
+        and _paragraph_visible_content(paragraph)
+    ]
+    last_embodiment_content_index = (
+        max(embodiment_content_indices)
+        if embodiment_content_indices
+        else None
+    )
+
     # General numbered description paragraphs use a full stop.  Drawing
     # captions have their own sequence below, while symbol descriptions are
     # intentionally exempt from all terminal-punctuation checks.
@@ -1149,13 +1264,28 @@ def _ending_punctuation_issues(
             or _PARAGRAPH_NUMBER.match(paragraph.text) is not None
         )
         content = _paragraph_visible_content(paragraph)
-        if not is_numbered or not content or content.endswith("。"):
+        embodiment_colon_is_valid = (
+            paragraph.section_key == "embodiments"
+            and content.endswith(("：", ":"))
+            and paragraph.index != last_embodiment_content_index
+        )
+        if (
+            not is_numbered
+            or not content
+            or content.endswith("。")
+            or embodiment_colon_is_valid
+        ):
             continue
         start, end = _ending_highlight_span(paragraph)
         yield _issue(
             "PCT002",
             f"段號「{paragraph.numbering_text or '手動段號'}」的內容沒有以全形句號「。」結尾。",
-            "請將本數字段落的結尾改為全形句號「。」。",
+            (
+                "請將實施方式最後一小段改為全形句號「。」；冒號僅可用於引出後續小段。"
+                if paragraph.section_key == "embodiments"
+                and content.endswith(("：", ":"))
+                else "請將本數字段落的結尾改為全形句號「。」。"
+            ),
             paragraph=paragraph,
             start=start,
             end=end,
@@ -1393,6 +1523,118 @@ def _patent_target_names(title: str) -> set[str]:
     return {target for target in targets if target}
 
 
+def _target_name_label_intrusion_issues(
+    document: PatentDocument,
+    labels_by_name: Dict[str, set[str]],
+) -> Iterable[PatentIssue]:
+    """Detect a registered label inserted into the complete patent title.
+
+    A component can be used legally as ``該平板5`` while the complete target
+    must remain ``平板觸控裝置``.  Reconstructing the known title after
+    removing one registered label distinguishes those two cases without
+    disabling ordinary component-label checking.
+    """
+
+    title = _canonical_name(document.patent_title)
+    if not title or not labels_by_name:
+        return
+
+    def spaced_literal(value: str) -> str:
+        return r"\s*".join(re.escape(character) for character in value)
+
+    patterns: List[Tuple[re.Pattern[str], str, str]] = []
+    for component_name in sorted(labels_by_name, key=len, reverse=True):
+        # Preserve the established component-priority rule when the patent
+        # title itself is exactly the registered component name.  REF006 only
+        # protects a larger complete title containing that component.
+        if not component_name or component_name == title:
+            continue
+        for occurrence in re.finditer(re.escape(component_name), title):
+            prefix = title[:occurrence.start()]
+            suffix = title[occurrence.end():]
+            for label in sorted(
+                labels_by_name[component_name],
+                key=len,
+                reverse=True,
+            ):
+                canonical_label = _canonical_symbol(label)
+                if not canonical_label:
+                    continue
+                label_literal = spaced_literal(canonical_label)
+                pattern = re.compile(
+                    spaced_literal(prefix)
+                    + (r"\s*" if prefix else "")
+                    + spaced_literal(component_name)
+                    + r"\s*"
+                    + rf"(?P<label>(?:{label_literal})|"
+                    + rf"(?:[（(]\s*{label_literal}\s*[）)]))"
+                    + (r"\s*" if suffix else "")
+                    + spaced_literal(suffix)
+                )
+                patterns.append((pattern, component_name, canonical_label))
+
+    if not patterns:
+        return
+
+    excluded_sections = {
+        "invention_title",
+        "utility_model_title",
+        "english_title",
+        *_SYMBOL_SECTIONS,
+    }
+    emitted: set[Tuple[int, int, int]] = set()
+    for paragraph in document.paragraphs:
+        if paragraph.is_heading or paragraph.section_key in excluded_sections:
+            continue
+        text = unicodedata.normalize("NFKC", paragraph.text).replace("′", "'")
+        candidates = []
+        for pattern, component_name, label in patterns:
+            for match in pattern.finditer(text):
+                candidates.append(
+                    (
+                        match.start(),
+                        match.end(),
+                        -len(component_name),
+                        match.start("label"),
+                        match.end("label"),
+                        component_name,
+                        label,
+                    )
+                )
+        for (
+            _target_start,
+            _target_end,
+            _negative_name_length,
+            label_start,
+            label_end,
+            component_name,
+            label,
+        ) in sorted(candidates):
+            key = (paragraph.index, label_start, label_end)
+            if key in emitted:
+                continue
+            emitted.add(key)
+            yield _issue(
+                "REF006",
+                (
+                    f"完整標的名稱「{document.patent_title}」中插入了元件"
+                    f"「{component_name}」的標號「{label}」。"
+                ),
+                (
+                    "請刪除完整標的名稱中的元件標號；只有在獨立指稱"
+                    f"該元件（例如「該{component_name}{label}」）時才保留標號。"
+                ),
+                paragraph=paragraph,
+                start=label_start,
+                end=label_end,
+                details={
+                    "patent_title": document.patent_title,
+                    "component_name": component_name,
+                    "inserted_label": label,
+                },
+            )
+
+
 def _match_symbol_line(text: str):
     return _SYMBOL_LINE.match(text) or _SYMBOL_SPACE_LINE.match(text)
 
@@ -1566,7 +1808,10 @@ def _embodiment_local_component_names(
     return local_names
 
 
-def _reference_issues(document: PatentDocument) -> Iterable[PatentIssue]:
+def _reference_issues(
+    document: PatentDocument,
+    protected_phrases: Sequence[str] = (),
+) -> Iterable[PatentIssue]:
     """Compare implementation name/label pairs with the complete list."""
 
     # Import locally to keep the rule model independent during package startup.
@@ -1582,6 +1827,11 @@ def _reference_issues(document: PatentDocument) -> Iterable[PatentIssue]:
         defined_labels.add(entry.label)
     if not defined_labels:
         return
+
+    yield from _target_name_label_intrusion_issues(
+        document,
+        expected_by_name,
+    )
 
     emitted: set[Tuple[str, int, int, str]] = set()
 
@@ -1662,6 +1912,11 @@ def _reference_issues(document: PatentDocument) -> Iterable[PatentIssue]:
             (match.start(), match.end(), local_name)
             for local_name in local_component_names
             for match in re.finditer(re.escape(local_name), text)
+        ]
+        protected_phrase_spans = [
+            span
+            for phrase in protected_phrases
+            for span in _phrase_spans_ignoring_whitespace(text, phrase)
         ]
 
         # Strong comparison: an exact name from the list is followed by a
@@ -1776,6 +2031,17 @@ def _reference_issues(document: PatentDocument) -> Iterable[PatentIssue]:
                 for local_start, local_end, local_name in local_component_spans
             ):
                 continue
+            if any(
+                phrase_start <= start and end <= phrase_end
+                for phrase_start, phrase_end in protected_phrase_spans
+            ):
+                # A document-specific fuzzy-match whitelist protects the
+                # complete phrase, not merely an exact candidate name.  Thus
+                # a registered short component such as「建築」embedded in the
+                # whitelisted phrase「建築物結構檢查報告」does not create a
+                # missing-label error.  Occurrences outside the phrase remain
+                # subject to the normal REF004 rule.
+                continue
             issue = emit_once(
                 "REF004",
                 paragraph,
@@ -1845,6 +2111,26 @@ def _component_name_typo_issues(
         document,
         registered_names,
     )
+    expected_metadata = [
+        (name, len(name), Counter(name))
+        for name in sorted(registered_names, key=len, reverse=True)
+        if name not in ignored_names
+    ]
+
+    @lru_cache(maxsize=16384)
+    def candidate_is_eligible(candidate: str) -> bool:
+        # These checks depend only on the candidate and this review's fixed
+        # symbol/whitelist sets, not its paragraph or expected comparison name.
+        # Repeated windows previously scanned every registered name again.
+        # Keep the cache bounded and local so edited documents/rules never
+        # inherit stale eligibility from a previous review.
+        if candidate in ignored_names:
+            return False
+        return not (
+            candidate in registered_names
+            or any(candidate in registered for registered in registered_names)
+            or not all("\u3400" <= character <= "\u9fff" for character in candidate)
+        )
 
     for paragraph in document.paragraphs:
         if (
@@ -1877,52 +2163,99 @@ def _component_name_typo_issues(
             for name in registered_names
             for match in re.finditer(re.escape(name), compact_text)
         ]
+        # These two lookups replace repeated linear interval scans for every
+        # candidate window while preserving the exact containment/overlap
+        # semantics used by the original implementation.
+        enclosing_end = [-1] * (len(compact_text) + 1)
+        for left, right in protected_spans:
+            if 0 <= left <= len(compact_text):
+                enclosing_end[left] = max(enclosing_end[left], right)
+        for position in range(1, len(enclosing_end)):
+            enclosing_end[position] = max(
+                enclosing_end[position],
+                enclosing_end[position - 1],
+            )
+
+        exact_delta = [0] * (len(compact_text) + 1)
+        for left, right in exact_spans:
+            exact_delta[left] += 1
+            exact_delta[right] -= 1
+        exact_prefix = [0] * (len(compact_text) + 1)
+        coverage = 0
+        for position in range(len(compact_text)):
+            coverage += exact_delta[position]
+            exact_prefix[position + 1] = (
+                exact_prefix[position] + (1 if coverage else 0)
+            )
+
         findings: Dict[Tuple[int, int, str], set[str]] = defaultdict(set)
         finding_modes: Dict[Tuple[int, int, str], set[str]] = defaultdict(set)
-        for expected in sorted(registered_names, key=len, reverse=True):
-            if expected in ignored_names:
-                continue
-            length = len(expected)
-            expected_counts = Counter(expected)
+        for expected, length, expected_counts in expected_metadata:
             for start in range(0, len(compact_text) - length + 1):
                 end = start + length
-                if any(
-                    left <= start and end <= right
-                    for left, right in protected_spans
-                ):
+                if enclosing_end[start] >= end:
                     continue
-                if any(left < end and right > start for left, right in exact_spans):
+                if exact_prefix[end] != exact_prefix[start]:
                     continue
                 candidate = compact_text[start:end]
-                if _canonical_name(candidate) in ignored_names:
+                if not candidate_is_eligible(candidate):
                     continue
-                differences = [
-                    index
-                    for index, (actual, wanted) in enumerate(zip(candidate, expected))
-                    if actual != wanted
-                ]
-                candidate_counts = Counter(candidate)
-                missing_characters = list(
-                    (expected_counts - candidate_counts).elements()
-                )
-                additional_characters = list(
-                    (candidate_counts - expected_counts).elements()
-                )
-                positional_one_character = len(differences) == 1
+
+                difference_count = 0
+                difference_index = -1
+                for index, (actual, wanted) in enumerate(
+                    zip(candidate, expected)
+                ):
+                    if actual == wanted:
+                        continue
+                    difference_count += 1
+                    difference_index = index
+                positional_one_character = difference_count == 1
+
+                if positional_one_character:
+                    missing_count = 1
+                    additional_count = 1
+                    missing_character = expected[difference_index]
+                    additional_character = candidate[difference_index]
+                else:
+                    character_delta = dict(expected_counts)
+                    for character in candidate:
+                        character_delta[character] = (
+                            character_delta.get(character, 0) - 1
+                        )
+                    missing_count = sum(
+                        count for count in character_delta.values() if count > 0
+                    )
+                    additional_count = -sum(
+                        count for count in character_delta.values() if count < 0
+                    )
+                    missing_character = next(
+                        (
+                            character
+                            for character, count in character_delta.items()
+                            if count > 0
+                        ),
+                        "",
+                    )
+                    additional_character = next(
+                        (
+                            character
+                            for character, count in character_delta.items()
+                            if count < 0
+                        ),
+                        "",
+                    )
                 reordered_exact = (
                     candidate != expected
-                    and not missing_characters
-                    and not additional_characters
+                    and missing_count == 0
+                    and additional_count == 0
                 )
                 reordered_one_character = (
-                    len(missing_characters) == 1
-                    and len(additional_characters) == 1
+                    missing_count == 1
+                    and additional_count == 1
                 )
                 if (
-                    candidate in registered_names
-                    or any(candidate in registered for registered in registered_names)
-                    or re.fullmatch(r"[\u3400-\u9fff]+", candidate) is None
-                    or not (
+                    not (
                         positional_one_character
                         or reordered_exact
                         or reordered_one_character
@@ -1930,11 +2263,11 @@ def _component_name_typo_issues(
                 ):
                     continue
                 legal_variant_characters = (
-                    len(missing_characters) == 1
-                    and len(additional_characters) == 1
+                    missing_count == 1
+                    and additional_count == 1
                     and {
-                        missing_characters[0],
-                        additional_characters[0],
+                        missing_character,
+                        additional_character,
                     }
                     == {"主", "副"}
                 )
@@ -2090,9 +2423,187 @@ def _claim_dependencies(text: str, body_start: int) -> List[Tuple[List[int], int
     return parse_fragment(body, body_start)
 
 
+_CLAIM_DUPLICATE_WIDTH_MAP = {
+    code: chr(code - 0xFEE0) for code in range(0xFF01, 0xFF5F)
+}
+_CLAIM_DUPLICATE_WIDTH_MAP.update({0x3000: " ", 0x2032: "'", 0x2019: "'"})
+
+
+def _duplicate_claim_key(body: str) -> str:
+    """Normalize layout, not technical meaning (case, powers, numbers, etc.)."""
+
+    # Full NFKC would collapse e.g. m² into m2; restrict normalization to width.
+    text = body.translate(_CLAIM_DUPLICATE_WIDTH_MAP)
+
+    def layout_space(match: re.Match) -> str:
+        left = text[match.start() - 1] if match.start() else ""
+        right = text[match.end()] if match.end() < len(text) else ""
+        # Preserve token boundaries in English/technical values: a b != ab.
+        if left.isascii() and left.isalnum() and right.isascii() and right.isalnum():
+            return " "
+        return ""
+
+    return re.sub(r"\s+", layout_space, text)
+
+
+def _duplicate_claim_issues(entries: Sequence[Dict[str, object]]) -> Iterable[PatentIssue]:
+    """Compare already parsed full claim bodies, grouping identical items once."""
+
+    groups: Dict[str, List[Dict[str, object]]] = defaultdict(list)
+    for entry in entries:
+        key = _duplicate_claim_key(str(entry["body"]))
+        if key:
+            groups[key].append(entry)
+    for duplicates in groups.values():
+        if len(duplicates) < 2:
+            continue
+        numbers = [int(entry["number"]) for entry in duplicates]
+        # Locate the first repeated item rather than flagging the original.
+        entry = duplicates[1]
+        paragraph = entry["paragraph"]
+        prefix = None if entry["auto_numbered"] else _claim_prefix(paragraph.text)
+        start = prefix.end() if prefix is not None else 0
+        separator = re.match(r"\s*[:：、.．]\s*", paragraph.text[start:])
+        if separator is not None:
+            start += separator.end()
+        yield _issue(
+            "CLM018",
+            f"請求項 {'、'.join(map(str, numbers))} 的完整內文重複"
+            "（已忽略自身項次、排版空白及等價全半形字元）。",
+            "請回原始 Word 確認是否為重複貼上或漏寫差異；"
+            "本提醒不判定各請求項的法律範圍是否相同。",
+            paragraph=paragraph,
+            start=start,
+            end=len(paragraph.text),
+            details={
+                "claim_number": int(entry["number"]),
+                "duplicate_claim_numbers": numbers,
+                "paragraph_indices": [
+                    source.index for source in entry["source_paragraphs"]
+                ],
+                "highlight_text": str(entry["body"]),
+                "body_offset": 0,
+            },
+        )
+
+
+def _claim_disclosure_issues(
+    document: PatentDocument,
+    entries: Sequence[Dict[str, object]],
+    component_names: Sequence[str],
+    subjects: Dict[int, str],
+    report_out: Optional[Dict[str, object]] = None,
+) -> Iterable[PatentIssue]:
+    """Adapt evidence-based coverage results to the existing review UI."""
+
+    from .claim_coverage import analyze_claim_disclosure
+
+    first = next((entry for entry in entries if int(entry["number"]) == 1), None)
+    paragraphs = [p for p in document.paragraphs if p.section_key == "disclosure"]
+    body = str(first["body"]) if first is not None else ""
+    report = analyze_claim_disclosure(
+        body,
+        paragraphs,
+        component_names=component_names,
+        subject_names=[name for name in (subjects.get(1, ""), document.patent_title) if name],
+    )
+    report["claim_number"] = 1
+    report["section_key"] = "disclosure"
+    if report_out is not None:
+        report_out.update(report)
+    # Existing structure/empty-claim rules already handle an absent claim 1.
+    if first is None or not body.strip():
+        return
+    anchor = first["paragraph"]
+    if report.get("status") == "unavailable":
+        limitations = report.get("limitations", [])
+        explanation = str(limitations[-1]) if limitations else "請確認兩個章節的文字均可擷取。"
+        issue = _issue(
+            "CLM019",
+            "請求項1與發明／新型內容尚未完成對應檢核。" + explanation,
+            "請確認發明／新型內容章節及請求項1均可擷取；未完成檢核不代表已涵蓋。",
+            paragraph=anchor,
+            start=0,
+            end=len(anchor.text),
+            details={"claim_number": 1, "coverage_status": "unavailable", "coverage_limitations": report.get("limitations", [])},
+        )
+        issue.severity = "info"
+        yield issue
+        return
+    status_titles = {
+        "possible_gap": "未找到足夠對應內容",
+        "conflict": "對應敘述可能不一致",
+        "uncertain": "改寫或語意需人工確認",
+    }
+    uncertain_issues: List[PatentIssue] = []
+    for item in report.get("items", []):
+        status = item.get("status", "uncertain")
+        if status == "covered":
+            continue
+        start = max(0, min(len(body), int(item.get("claim_start", 0))))
+        end = max(start, min(len(body), int(item.get("claim_end", len(body)))))
+        fragment = body[start:end]
+        preview = re.sub(r"\s+", "", fragment)
+        if len(preview) > 70:
+            preview = preview[:67] + "…"
+        reason = str(item.get("reason", "請對照原文確認此技術內容是否已記載。"))
+        source_paragraph = anchor
+        source_start, source_end = 0, len(anchor.text)
+        for span in first.get("body_source_spans", []):
+            if span["body_start"] <= start < span["body_end"]:
+                source_paragraph = span["paragraph"]
+                source_start = span["source_start"] + start - span["body_start"]
+                source_end = span["source_start"] + min(end, span["body_end"]) - span["body_start"]
+                break
+        issue = _issue(
+            "CLM019",
+            f"請求項1「{preview}」：{status_titles.get(status, status_titles['uncertain'])}。{reason}",
+            "請對照下方請求項1原文及發明／新型內容的候選證據，回原始 Word 確認；"
+            "其他章節的敘述不會抵銷本項提醒，程式不自動判斷法律支持性。",
+            paragraph=source_paragraph,
+            start=source_start,
+            end=source_end,
+            details={
+                "claim_number": 1,
+                "coverage_status": status,
+                "coverage_item": item,
+                "coverage_limitations": report.get("limitations", []),
+                "highlight_text": fragment,
+                "body_offset": len(re.sub(r"\s+", "", body[:start])),
+            },
+        )
+        if status == "uncertain":
+            issue.severity = "info"
+            uncertain_issues.append(issue)
+        else:
+            yield issue
+    if len(uncertain_issues) == 1:
+        yield uncertain_issues[0]
+    elif uncertain_issues:
+        first_issue = uncertain_issues[0]
+        details = dict(first_issue.details)
+        details.pop("coverage_item", None)
+        details["coverage_items"] = [
+            dict(issue.details["coverage_item"], body_offset=issue.details["body_offset"])
+            for issue in uncertain_issues
+        ]
+        grouped = _issue(
+            "CLM019",
+            f"請求項1有 {len(uncertain_issues)} 處改寫或語意需人工確認；點選可查看全部待確認片段與候選原文。",
+            first_issue.suggestion,
+            paragraph=next((p for p in document.paragraphs if p.index == first_issue.paragraph_index), anchor),
+            start=first_issue.char_start,
+            end=first_issue.char_end,
+            details=details,
+        )
+        grouped.severity = "info"
+        yield grouped
+
+
 def _claim_issues(
     document: PatentDocument,
     detected_subjects: Optional[List[str]] = None,
+    coverage_report: Optional[Dict[str, object]] = None,
 ) -> Iterable[PatentIssue]:
     from .symbol_transfer import extract_document_symbols
 
@@ -2248,8 +2759,20 @@ def _claim_issues(
                 continue
             seen_source_indices.add(source_paragraph.index)
             source_paragraphs.append(source_paragraph)
-        body = stream[int(marker["end"]):segment_end]
-        body = re.sub(r"^\s*[:：、.．]\s*", "", body).strip()
+        raw_body = stream[int(marker["end"]):segment_end]
+        body = re.sub(r"^\s*[:：、.．]\s*", "", raw_body).strip()
+        body_start = int(marker["end"]) + (raw_body.find(body) if body else 0)
+        body_source_spans = []
+        for chunk in chunks:
+            left = max(body_start, int(chunk["text_start"]))
+            right = min(body_start + len(body), int(chunk["end"]))
+            if left < right:
+                body_source_spans.append({
+                    "paragraph": chunk["paragraph"],
+                    "body_start": left - body_start,
+                    "body_end": right - body_start,
+                    "source_start": left - int(chunk["text_start"]),
+                })
         paragraph = marker["paragraph"]
         if not marker["auto_numbered"]:
             yield _issue(
@@ -2265,12 +2788,17 @@ def _claim_issues(
                 "number": int(marker["number"]),
                 "paragraph": paragraph,
                 "body": body,
+                "stream_body_start": int(marker["end"]),
+                "stream_body_end": segment_end,
                 "number_start": int(marker["number_start"]),
                 "number_end": int(marker["number_end"]),
                 "auto_numbered": bool(marker["auto_numbered"]),
                 "source_paragraphs": source_paragraphs or [paragraph],
+                "body_source_spans": body_source_spans,
             }
         )
+
+    yield from _duplicate_claim_issues(entries)
 
     first_claim_is_multiline = bool(
         entries and "\n" in str(entries[0]["body"]).strip()
@@ -2431,15 +2959,43 @@ def _claim_issues(
                 start=0,
                 end=len(paragraph.text),
             )
-        if analysis_body.count("。") != 1 or not analysis_body.endswith("。"):
+        full_stop_count = analysis_body.count("。")
+        if full_stop_count != 1 or not analysis_body.endswith("。"):
+            if full_stop_count > 1:
+                message = (
+                    f"請求項{number}共出現{full_stop_count}個句號「。」；"
+                    "同一請求項只能出現一次句號。"
+                )
+            elif full_stop_count == 0:
+                message = f"請求項{number}沒有全形句號「。」；請於句尾補上一個句號。"
+            else:
+                message = f"請求項{number}的句號「。」不在句尾；句號只能出現一次並位於句尾。"
+
+            # Highlight the first internal full stop (or the final character
+            # when missing), within this claim's exact source-stream bounds.
+            # Claims can span Word paragraphs or share one paragraph, so a
+            # paragraph-wide search could point into a different claim.
+            stream_start = int(entry["stream_body_start"])
+            stream_end = int(entry["stream_body_end"])
+            focus = stream.find("。", stream_start, stream_end)
+            if focus < 0:
+                focus = stream_start + len(stream[stream_start:stream_end].rstrip()) - 1
+            source_paragraph = paragraph
+            start, end = _ending_highlight_span(paragraph)
+            for chunk in chunks:
+                if int(chunk["text_start"]) <= focus < int(chunk["end"]):
+                    source_paragraph = chunk["paragraph"]
+                    start = focus - int(chunk["text_start"])
+                    end = start + 1
+                    break
             yield _issue(
                 "CLM009",
-                f"請求項{number}未辨識為一個以句號結束的單句。",
+                message,
                 "請人工確認請求項是否為單一句，並僅在句尾使用一個句號。",
-                paragraph=paragraph,
-                start=0,
-                end=len(paragraph.text),
-                details={"full_stop_count": analysis_body.count("。")},
+                paragraph=source_paragraph,
+                start=start,
+                end=end,
+                details={"claim_number": number, "full_stop_count": full_stop_count},
             )
 
         # A dependent claim remains a single sentence regardless of its Word
@@ -2586,7 +3142,7 @@ def _claim_issues(
 
     def component_occurrences(body: str) -> List[Tuple[int, int, str]]:
         candidates: List[Tuple[int, int, int, str]] = []
-        for name in known_names:
+        for name in occurrence_names:
             for match in re.finditer(re.escape(name), body):
                 candidates.append(
                     (match.start(), match.end(), len(name), name)
@@ -2635,6 +3191,10 @@ def _claim_issues(
     quantifier_pattern = re.compile(
         rf"^(?P<quantifier>{quantifier_expression})"
     )
+    quantified_ordinal_modifier_pattern = re.compile(
+        rf"(?<![第該])(?P<quantifier>{quantifier_expression})"
+        r"(?:第[一二三四五六七八九十百兩0-9A-Za-z]+)$"
+    )
     trailing_quantifier_pattern = re.compile(
         rf"(?<![第該])(?P<quantifier>{quantifier_expression})$"
     )
@@ -2662,7 +3222,7 @@ def _claim_issues(
     relationship_modifier_expression = (
         r"與|及|相對|相反|垂直|平行|連通|連接|耦接|相鄰|鄰接|"
         r"位於|設置於|形成於|配置於|沿|朝|面向|對應|間隔|遠離|靠近|"
-        r"穿過|橫跨|圍繞|覆蓋|接觸|供|用以"
+        r"穿過|橫跨|圍繞|繞|覆蓋|接觸|供|用以"
     )
     relationship_modifier_head_pattern = re.compile(
         rf"^(?:{relationship_modifier_expression})"
@@ -2725,6 +3285,14 @@ def _claim_issues(
             return apply_distributive_ownership(
                 kind_for_quantifier(direct_match.group("quantifier"))
             )
+        ordinal_match = quantified_ordinal_modifier_pattern.search(prefix)
+        if ordinal_match is not None:
+            # A symbol-list name may be the shared base「PTC元件」while the
+            # claim introduces「一第一PTC元件」and「一第二PTC元件」.  The
+            # ordinal is a modifier; the earlier「一」remains the quantity.
+            return apply_distributive_ownership(
+                kind_for_quantifier(ordinal_match.group("quantifier"))
+            )
         # A quantity can introduce a component through a long prenominal
         # modifier, for example「一沿一頂底方向設置的基座」.  A simple
         # nearest-quantity rule would incorrectly bind the inner「一」to
@@ -2738,6 +3306,11 @@ def _claim_issues(
         for candidate in premodified_quantity_pattern.finditer(prefix):
             tail = prefix[candidate.end("quantifier"):]
             if premodifier_tail_pattern.fullmatch(tail) is None:
+                continue
+            if tail.startswith("者"):
+                # 「其中兩者……」counts the previously mentioned subjects;
+                # 「兩」is not the quantity of a component introduced later in
+                # the same clause.
                 continue
             boundary = candidate.group("boundary")
             score = 40 if boundary in strong_quantity_boundaries else 10
@@ -2755,9 +3328,10 @@ def _claim_issues(
             )[2]
             return apply_distributive_ownership(kind_for_quantifier(quantifier))
         # Some patent sentences use a construction verb that is not itself a
-        # list boundary, e.g.「界定一連通該開口的電池空間」.  Accept only a
-        # constrained relationship modifier here; the negative guards keep
-        # the「一／二」inside「第一／第二」from becoming a quantity.
+        # list boundary, e.g.「界定一連通該開口的電池空間」and
+        # 「沿一繞該軸線的第一周向」.  Accept only a constrained relationship
+        # modifier here; the negative guards keep the「一／二」inside
+        # 「第一／第二」from becoming a quantity.
         relational_match = relational_premodifier_quantity_pattern.search(prefix)
         if relational_match is not None:
             return apply_distributive_ownership(
@@ -2807,6 +3381,8 @@ def _claim_issues(
                 before = lookback[:candidate.start("quantifier")]
                 tail = lookback[candidate.end("quantifier"):]
                 if before.endswith(nested_quantity_prefixes):
+                    continue
+                if tail.startswith("者"):
                     continue
                 if any(tail.startswith(known_name) for known_name in known_names):
                     continue
@@ -2874,36 +3450,34 @@ def _claim_issues(
             return "plural_member"
         return ""
 
-    own_introductions: Dict[int, Dict[str, set[str]]] = {}
-    for entry in entries:
-        number = int(entry["number"])
-        body = str(entry["analysis_body"])
-        states: Dict[str, set[str]] = defaultdict(set)
-        for start, _end, name in component_occurrences(body):
-            kind = introduction_kind(body, start)
-            if kind:
-                states[name].add(kind)
-        own_introductions[number] = states
+    qualified_reference_pattern = re.compile(
+        rf"(?P<reference>{_COMPONENT_REFERENCE_EXPRESSION})"
+        r"(?P<modifier>第[一二三四五六七八九十百兩0-9A-Za-z]+)$"
+    )
+    corresponding_singular_reference_pattern = re.compile(
+        r"(?P<modifier>(?:相)?對應(?:的|之))(?P<reference>該)$"
+    )
+    quantified_plural_reference_pattern = re.compile(
+        r"(?<![第該])"
+        r"(?P<reference>(?:(?:數|多)個|複數|[二三四五六七八九十百兩]+(?:個)?)該)$"
+    )
 
-    def accumulated_introductions(
-        claim_number: int,
-        visited: set[int],
-    ) -> Dict[str, set[str]]:
-        if claim_number in visited:
-            return {}
-        visited = visited | {claim_number}
-        state: Dict[str, set[str]] = defaultdict(set)
-        for name, kinds in own_introductions.get(claim_number, {}).items():
-            state[name].update(kinds)
-        claim = entries_by_number.get(claim_number)
-        if claim is None:
-            return state
-        for dependency in claim["dependencies"]:
-            for name, kinds in accumulated_introductions(
-                int(dependency), visited
-            ).items():
-                state[name].update(kinds)
-        return state
+    subject_name_candidates = sorted(
+        set(known_names) | {_canonical_name(document.patent_title)},
+        key=len,
+        reverse=True,
+    )
+    subject_application_expression = (
+        r"(?:係|可)?(?:應用於|適用於|運用於|使用於|用於)"
+    )
+    subject_name_expression = "|".join(
+        re.escape(name) for name in subject_name_candidates if name
+    ) or r"(?!)"
+    named_subject_application_pattern = re.compile(
+        r"^(?:一種|一)?(?P<subject>"
+        + subject_name_expression
+        + rf")(?={subject_application_expression})"
+    )
 
     def claim_subject_match(
         body: str,
@@ -2913,9 +3487,15 @@ def _claim_issues(
             quantified = _QUANTIFIED_AS_DESCRIBED_TARGET.match(body)
             if quantified is not None:
                 return quantified
+            # A complete known name can be followed by its intended use with
+            # no comma:「一種A應用於一B」. Only match a name at the opening;
+            # metadata alone cannot establish an unmentioned claim subject.
+            named_application = named_subject_application_pattern.match(body)
+            if named_application is not None:
+                return named_application
             anchored = re.match(
                 r"^(?:一種|一)?\s*(?P<subject>[\u4e00-\u9fffA-Za-z0-9]+?)"
-                r"(?=\s*(?:，|,|；|;|：|:|包含|包括|具有|其特徵))",
+                r"(?=\s*(?:，|,|；|;|：|:|。|包含|包括|具有|其特徵|$))",
                 body,
             )
             if anchored is not None:
@@ -2942,6 +3522,53 @@ def _claim_issues(
         number: (match.start("subject"), match.end("subject")) if match else None
         for number, match in subject_matches.items()
     }
+    # Match full subjects even when they have no symbol-list entry. Otherwise
+    #「該螺旋鑽導引裝置」could be reduced to the embedded component「螺旋鑽」.
+    occurrence_names = sorted(
+        set(known_names) | {subject for subject in subjects.values() if subject},
+        key=len,
+        reverse=True,
+    )
+    subject_introductions: Dict[int, str] = {}
+    for entry in entries:
+        number = int(entry["number"])
+        match = subject_matches[number]
+        if not entry["is_independent"] or match is None:
+            continue
+        quantity = match.groupdict().get("quantity") or "一"
+        subject_introductions[number] = (
+            "singular" if quantity == "一"
+            else "flexible" if quantity == "至少一"
+            else "plural"
+        )
+
+    # An alternative dependency inherits ONE complete ancestor path, not the
+    # union of all alternatives. Store the final, sequentially analysed state
+    # of each path so local introductions and additive members stay branch-local.
+    resolved_claim_states: Dict[
+        int, List[Tuple[Tuple[int, ...], Dict[str, set[str]]]]
+    ] = defaultdict(list)
+
+    def claim_dependency_contexts():
+        # The consumer records each analysed state before requesting the next
+        # context; later claims can therefore inherit all completed paths.
+        for entry in entries:
+            number = int(entry["number"])
+            alternatives: List[Tuple[Tuple[int, ...], Dict[str, set[str]]]] = []
+            for dependency in entry["dependencies"]:
+                dependency = int(dependency)
+                # Invalid forward/self dependencies already have CLM003.
+                # Never borrow future state or traverse a malformed cycle.
+                prior_states = (
+                    resolved_claim_states.get(dependency)
+                    if dependency < number else None
+                )
+                alternatives.extend(prior_states or [((dependency,), {})])
+            if not alternatives:
+                alternatives.append(((), {}))
+            for index, (path, state) in enumerate(alternatives):
+                yield entry, path, state, len(alternatives) > 1, index == 0
+
     if detected_subjects is not None:
         for entry in entries:
             if not entry["is_independent"]:
@@ -2949,13 +3576,15 @@ def _claim_issues(
             subject = subjects.get(int(entry["number"]), "")
             if subject and subject not in detected_subjects:
                 detected_subjects.append(subject)
-    for entry in entries:
+    for (
+        entry, dependency_path, inherited_state, multiple_paths, first_path
+    ) in claim_dependency_contexts():
         paragraph = entry["paragraph"]
         body = str(entry["body"])
         analysis_body = str(entry["analysis_body"])
         number = int(entry["number"])
         subject = subjects[number]
-        if not subject:
+        if first_path and not subject:
             yield _issue(
                 "CLM015",
                 f"系統無法可靠判別請求項{number}的標的名稱。",
@@ -2964,7 +3593,7 @@ def _claim_issues(
                 start=0,
                 end=min(len(paragraph.text), 64),
             )
-        if not entry["is_independent"]:
+        if first_path and not entry["is_independent"]:
             for dependency in entry["dependencies"]:
                 dependency_subject = subjects.get(int(dependency), "")
                 if subject and dependency_subject and subject != dependency_subject:
@@ -2983,17 +3612,17 @@ def _claim_issues(
                     break
 
         current_state: Dict[str, set[str]] = defaultdict(set)
-        for dependency in entry["dependencies"]:
-            for name, kinds in accumulated_introductions(
-                int(dependency), set()
-            ).items():
-                current_state[name].update(kinds)
+        if number in subject_introductions:
+            current_state[subject].add(subject_introductions[number])
+        for name, kinds in inherited_state.items():
+            current_state[name].update(kinds)
 
         # A child introduced while describing "each" member of a plural
         # parent is plural at claim level, but singular inside that same local
         # distributive scope.  Keep the scope origin separately so a later
         # direct singular reference outside the scope is still rejected.
         distributive_scope_components: Dict[str, set[int]] = defaultdict(set)
+        emitted_component_issue_messages: set[Tuple[str, str]] = set()
 
         for start, _end, name in component_occurrences(analysis_body):
             subject_span = subject_spans.get(number)
@@ -3003,6 +3632,13 @@ def _claim_issues(
                 and _end <= subject_span[1]
             ):
                 continue
+            if name in _CLAIM_QUANTITY_EXEMPT_COMPONENT_NAMES:
+                # 「步驟」is a special procedural item.  Patent claims freely
+                # alternate between「步驟／該步驟／該等步驟」and list headers
+                # such as「以下步驟」, so it is exempt from claim-level
+                # quantity/article agreement.  Embodiment label checks remain
+                # independent and continue to require its registered symbol.
+                continue
             prefix = analysis_body[max(0, start - 80):start]
             available = current_state.get(name, set())
             additive_match = additive_member_pattern.search(prefix)
@@ -3010,7 +3646,17 @@ def _claim_issues(
                 # 「一開槽」加上「另一該開槽」後已建立至少兩個開槽，
                 # 本項後文及依附於本項的請求項都可使用「該等開槽」。
                 current_state[name].add("plural")
-                own_introductions[number][name].add("plural")
+                continue
+
+            quantified_plural_reference = (
+                quantified_plural_reference_pattern.search(prefix)
+            )
+            if quantified_plural_reference is not None and not available:
+                # Patent claims may establish a plural set using a definite
+                # plural phrase such as「複數該橫梁」.  Once established,
+                # selections such as「二個該橫梁／多個該橫梁」remain plural
+                # references even though the phrase ends in the character「該」.
+                current_state[name].add("plural")
                 continue
 
             kind = introduction_kind(analysis_body, start)
@@ -3043,14 +3689,45 @@ def _claim_issues(
                 ),
                 "",
             )
+            qualified_reference = qualified_reference_pattern.search(prefix)
+            corresponding_singular_reference = (
+                corresponding_singular_reference_pattern.search(prefix)
+            )
             if additive_prefix:
                 reference_kind = "additive_member"
                 reference_text = f"{additive_prefix}{name}"
+            elif quantified_plural_reference is not None:
+                reference_token = quantified_plural_reference.group("reference")
+                reference_kind = "plural"
+                reference_text = f"{reference_token}{name}"
+            elif corresponding_singular_reference is not None:
+                # A relationship modifier does not turn the following singular
+                # article into a plural reference.  Thus「複數A……對應的該A」
+                # remains a singular-after-plural quantity mismatch.
+                reference_token = corresponding_singular_reference.group("reference")
+                reference_kind = "singular"
+                reference_text = (
+                    f"{corresponding_singular_reference.group('modifier')}"
+                    f"{reference_token}{name}"
+                )
             else:
-                reference_token = anchored_reference or immediate_reference
+                reference_token = (
+                    anchored_reference
+                    or immediate_reference
+                    or (
+                        qualified_reference.group("reference")
+                        if qualified_reference is not None
+                        else ""
+                    )
+                )
                 reference_kind = reference_kind_for_token(reference_token)
                 if immediate_reference:
                     reference_text = f"{reference_token}{name}"
+                elif qualified_reference is not None:
+                    reference_text = (
+                        f"{reference_token}"
+                        f"{qualified_reference.group('modifier')}{name}"
+                    )
 
             current_scope = active_distributive_scope(analysis_body, start)
             introduced_in_current_scope = (
@@ -3157,6 +3834,15 @@ def _claim_issues(
                 if reference_kind and not available
                 else "CLM012"
             )
+            if multiple_paths:
+                path_text = " → ".join(
+                    f"請求項{ancestor}" for ancestor in (number, *dependency_path)
+                )
+                message = f"{message.rstrip('。')}（依附路徑：{path_text}）。"
+            issue_signature = (rule_id, message)
+            if issue_signature in emitted_component_issue_messages:
+                continue
+            emitted_component_issue_messages.add(issue_signature)
             yield _issue(
                 rule_id,
                 message,
@@ -3171,10 +3857,16 @@ def _claim_issues(
                     "highlight_text": reference_text,
                     "available_kinds": sorted(available),
                     "body_offset": start,
+                    "claim_number": number,
+                    "dependency_path": list(dependency_path),
                 },
             )
 
-        if entry["is_independent"]:
+        resolved_claim_states[number].append(
+            ((number, *dependency_path), current_state)
+        )
+
+        if first_path and entry["is_independent"]:
             mentioned = [name for name in known_names if name in _canonical_name(analysis_body)]
             if len(mentioned) >= 2 and not re.search(
                 r"連接|相接|接收|傳送|整合|讀取|設置|位於|屬於|結合|耦接|"
@@ -3190,6 +3882,14 @@ def _claim_issues(
                     end=len(paragraph.text),
                     details={"mentioned_components": mentioned},
                 )
+
+    yield from _claim_disclosure_issues(
+        document,
+        entries,
+        [entry.name for entry in transfer.full_entries if entry.name],
+        subjects,
+        coverage_report,
+    )
 
     independent_entries = [entry for entry in entries if entry["is_independent"]]
     for independent_entry in independent_entries:
@@ -3405,11 +4105,136 @@ def _embodiment_figure_ocr_issues(
         )
 
 
+def _embodiment_figure_reference_limit_issues(
+    document: PatentDocument,
+) -> Iterable[PatentIssue]:
+    from .figure_ocr_checker import parse_figure_references
+
+    maximum_figures = 4
+    for paragraph in document.paragraphs:
+        if paragraph.section_key != "embodiments" or paragraph.is_heading:
+            continue
+        references = parse_figure_references(paragraph.text)
+        if not references:
+            continue
+        figures = list(
+            dict.fromkeys(
+                figure
+                for reference in references
+                for figure in reference.figures
+            )
+        )
+        if len(figures) <= maximum_figures:
+            continue
+        figure_text = "、".join(f"圖{figure}" for figure in figures)
+        location = paragraph.numbering_text or "實施方式段落"
+        start = references[0].start
+        end = references[-1].end
+        yield _issue(
+            "REF007",
+            f"{location}共參閱{len(figures)}張不同圖式（{figure_text}），"
+            f"超過每段最多{maximum_figures}張的上限。",
+            "請拆分或調整該實施方式段落，使每一段最多參閱四張不同圖式。",
+            paragraph=paragraph,
+            start=start,
+            end=end,
+            details={
+                "referenced_figures": figures,
+                "figure_count": len(figures),
+                "maximum_figure_count": maximum_figures,
+                "highlight_text": paragraph.text[start:end],
+            },
+        )
+
+
+def _cross_section_figure_ocr_issues(
+    document: PatentDocument,
+    ocr_results: Sequence[Dict[str, object]],
+) -> Iterable[PatentIssue]:
+    from .figure_ocr_checker import find_cross_section_mismatches
+
+    for mismatch in find_cross_section_mismatches(document, ocr_results):
+        reference = mismatch.reference
+        target = f"圖{reference.target_figure}"
+        sources = "、".join(f"圖{number}" for number in reference.source_figures)
+        roman_pair = f"{reference.roman_text}-{reference.roman_right_text}"
+        if mismatch.reason == "roman_pair_mismatch":
+            message = f"{target}圖說的羅馬剖切線「{roman_pair}」前後不一致。"
+            suggestion = "請確認剖切線兩端是否應使用同一個羅馬數字。"
+        elif mismatch.reason == "invalid_roman":
+            message = f"{target}圖說的剖切線「{roman_pair}」不是有效羅馬數字。"
+            suggestion = "請回到 Word 確認剖切線名稱。"
+        elif mismatch.reason == "target_mismatch":
+            message = (
+                f"{target}記載剖切線「{roman_pair}」，但羅馬數字"
+                f"{reference.roman_text}換算後是{reference.roman_value}，與圖號不一致。"
+            )
+            suggestion = "請確認剖視圖圖號或羅馬剖切線是否誤植。"
+        elif mismatch.reason == "source_not_identified":
+            message = f"{target}記載剖切線「{roman_pair}」，但無法從圖說辨識其來源圖。"
+            suggestion = "請在圖式簡單說明中明確寫出剖切線所在的來源圖號。"
+        elif mismatch.reason == "source_not_loaded":
+            message = (
+                f"{target}記載沿{sources}的剖切線「{roman_pair}」取得，"
+                "但來源圖尚未載入 OCR 或尚未正確設定圖號。"
+            )
+            suggestion = "請在圖式標號頁載入來源圖，並確認該圖片所對應的圖號。"
+        else:
+            detected = "、".join(mismatch.source_drawing_labels) or "無"
+            message = (
+                f"{target}記載沿{sources}的剖切線「{roman_pair}」取得，"
+                f"但來源圖的 OCR 結果沒有偵測到「{reference.roman_text}」"
+                f"（目前偵測：{detected}）。"
+            )
+            suggestion = "請確認來源圖是否確實標有該羅馬剖切線，或回到圖式標號頁修正 OCR 結果。"
+        yield _issue(
+            "OCR002",
+            message,
+            suggestion,
+            paragraph=reference.paragraph,
+            start=reference.start,
+            end=reference.end,
+            details={
+                "reason": mismatch.reason,
+                "target_figure": reference.target_figure,
+                "source_figures": list(reference.source_figures),
+                "roman_text": reference.roman_text,
+                "roman_right_text": reference.roman_right_text,
+                "roman_value": reference.roman_value,
+                "source_drawing_labels": list(mismatch.source_drawing_labels),
+                "caption_text": reference.text,
+            },
+        )
+
+
+def _unused_figure_ocr_issues(
+    document: PatentDocument,
+    ocr_results: Sequence[Dict[str, object]],
+) -> Iterable[PatentIssue]:
+    from .figure_ocr_checker import find_unused_ocr_figures
+
+    for unused in find_unused_ocr_figures(document, ocr_results):
+        yield _issue(
+            "OCR003",
+            f"OCR 已載入圖{unused.figure}，但全文沒有引用、參閱或圖式簡單說明記載此圖。",
+            "請確認該圖是否漏寫於圖式簡單說明或實施方式；若不是本案圖式，請移除或修正圖片圖號。",
+            paragraph=unused.anchor_paragraph,
+            start=0 if unused.anchor_paragraph is not None else None,
+            end=(
+                len(unused.anchor_paragraph.text)
+                if unused.anchor_paragraph is not None
+                else None
+            ),
+            details={"unused_figure": unused.figure},
+        )
+
+
 def review_document(
     document: PatentDocument,
     custom_rules: Sequence[CustomTextRule] = (),
     *,
     ocr_results: Sequence[Dict[str, object]] = (),
+    component_reference_whitelist: Sequence[str] = (),
 ) -> PatentTextReview:
     """Run all Stage 2 rules without modifying the parsed document or DOCX."""
 
@@ -3430,15 +4255,21 @@ def review_document(
         _format_issues,
         _section_order_issues,
         _paragraph_number_issues,
+        _abstract_length_issues,
         _ending_punctuation_issues,
         _symbol_issues,
         _drawing_issues,
-        _reference_issues,
         _terminology_issues,
         _typography_issues,
         _table_scope_issues,
     ):
         issues.extend(producer(document))
+    issues.extend(
+        _reference_issues(
+            document,
+            protected_phrases=component_reference_whitelist or (),
+        )
+    )
     issues.extend(
         _component_name_typo_issues(
             document,
@@ -3446,8 +4277,12 @@ def review_document(
         )
     )
     claim_subjects: List[str] = []
-    issues.extend(_claim_issues(document, claim_subjects))
+    claim_disclosure_coverage: Dict[str, object] = {}
+    issues.extend(_claim_issues(document, claim_subjects, claim_disclosure_coverage))
+    issues.extend(_embodiment_figure_reference_limit_issues(document))
     issues.extend(_embodiment_figure_ocr_issues(document, ocr_results or ()))
+    issues.extend(_cross_section_figure_ocr_issues(document, ocr_results or ()))
+    issues.extend(_unused_figure_ocr_issues(document, ocr_results or ()))
     issues.extend(_custom_text_issues(document, blacklist_rules))
     issues.sort(
         key=lambda issue: (
@@ -3466,6 +4301,7 @@ def review_document(
         patent_title=document.patent_title,
         generated_at_utc=datetime.now(timezone.utc).isoformat(),
         claim_subjects=claim_subjects,
+        claim_disclosure_coverage=claim_disclosure_coverage,
         issues=issues,
         rule_catalog=(
             list(RULE_CATALOG)

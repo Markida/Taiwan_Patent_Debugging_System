@@ -3,11 +3,13 @@
 from .docx_reader import PatentDocxError, parse_docx
 from .custom_rules import (
     CUSTOM_TEXT_RULES_FILENAME,
+    DOCUMENT_SIMILARITY_WHITELISTS_FILENAME,
     CustomRuleError,
     CustomRuleStorageError,
     CustomRuleValidationError,
     CustomTextRule,
     CustomTextRuleStore,
+    DocumentSimilarityWhitelistStore,
 )
 from .models import PatentDocument, PatentIssue, PatentTextReview, RuleDefinition
 from .rule_engine import RULE_CATALOG, review_document
@@ -35,11 +37,13 @@ __all__ = [
     "RULE_CATALOG",
     "RuleDefinition",
     "CUSTOM_TEXT_RULES_FILENAME",
+    "DOCUMENT_SIMILARITY_WHITELISTS_FILENAME",
     "CustomRuleError",
     "CustomRuleStorageError",
     "CustomRuleValidationError",
     "CustomTextRule",
     "CustomTextRuleStore",
+    "DocumentSimilarityWhitelistStore",
     "parse_docx",
     "review_document",
     "DocumentSymbolTransfer",

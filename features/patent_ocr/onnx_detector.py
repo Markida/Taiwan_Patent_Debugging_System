@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import cv2
@@ -131,27 +132,14 @@ class OnnxDetector:
     """Run the one-class production detector through bundled OpenCV DNN."""
 
     names = {0: "patent_label"}
+    supports_sliced_inference = True
 
     def __init__(self, model_path):
         self.model_path = Path(model_path)
         self.names = load_onnx_class_names(self.model_path)
         self.network = load_onnx_network(self.model_path)
 
-    def predict(
-        self,
-        source,
-        imgsz=1536,
-        conf=0.25,
-        iou=0.4,
-        device="cpu",
-        verbose=False,
-    ):
-        del device, verbose
-        image = read_image(source)
-        if image is None:
-            raise ValueError(f"圖片讀取失敗：{source}")
-
-        input_size = int(imgsz or 1536)
+    def _infer_image(self, image, input_size, confidence):
         padded, ratio, (left, top) = _letterbox(image, input_size)
         blob = np.ascontiguousarray(
             padded[:, :, ::-1].transpose(2, 0, 1),
@@ -165,29 +153,153 @@ class OnnxDetector:
 
         xywh = predictions[:, :4]
         class_scores = predictions[:, 4:].max(axis=1)
-        classes = predictions[:, 4:].argmax(axis=1)
-        confident = class_scores >= float(conf)
+        classes = predictions[:, 4:].argmax(axis=1).astype(np.int32)
+        confident = class_scores >= float(confidence)
         xywh = xywh[confident]
-        class_scores = class_scores[confident]
+        class_scores = class_scores[confident].astype(np.float32)
         classes = classes[confident]
         if not len(xywh):
-            return [DetectionResult([])]
+            return (
+                np.empty((0, 4), dtype=np.float32),
+                np.empty(0, dtype=np.float32),
+                np.empty(0, dtype=np.int32),
+            )
 
-        boxes = np.empty_like(xywh)
+        boxes = np.empty_like(xywh, dtype=np.float32)
         boxes[:, 0] = xywh[:, 0] - xywh[:, 2] / 2
         boxes[:, 1] = xywh[:, 1] - xywh[:, 3] / 2
         boxes[:, 2] = xywh[:, 0] + xywh[:, 2] / 2
         boxes[:, 3] = xywh[:, 1] + xywh[:, 3] / 2
-
-        kept = _nms(boxes, class_scores, classes, float(iou))
-        boxes = boxes[kept]
-        class_scores = class_scores[kept]
-        classes = classes[kept]
         height, width = image.shape[:2]
         boxes[:, [0, 2]] = (boxes[:, [0, 2]] - left) / ratio
         boxes[:, [1, 3]] = (boxes[:, [1, 3]] - top) / ratio
         boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, width)
         boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, height)
+        valid = (boxes[:, 2] - boxes[:, 0] >= 1) & (
+            boxes[:, 3] - boxes[:, 1] >= 1
+        )
+        return boxes[valid], class_scores[valid], classes[valid]
+
+    @staticmethod
+    def _tiles(width, height, fraction):
+        tile_width = min(width, max(1, int(math.ceil(width * fraction))))
+        tile_height = min(height, max(1, int(math.ceil(height * fraction))))
+        x_starts = sorted({0, width - tile_width})
+        y_starts = sorted({0, height - tile_height})
+        return [
+            (x1, y1, x1 + tile_width, y1 + tile_height)
+            for y1 in y_starts
+            for x1 in x_starts
+        ]
+
+    @staticmethod
+    def _apply_nms(boxes, scores, classes, iou):
+        if not len(boxes):
+            return boxes, scores, classes
+        kept = _nms(boxes, scores, classes, float(iou), max_detections=500)
+        return boxes[kept], scores[kept], classes[kept]
+
+    def _infer_slices(
+        self,
+        image,
+        input_size,
+        confidence,
+        iou,
+        tile_fraction,
+        edge_margin,
+    ):
+        height, width = image.shape[:2]
+        all_boxes = []
+        all_scores = []
+        all_classes = []
+        for x1, y1, x2, y2 in self._tiles(width, height, tile_fraction):
+            boxes, scores, classes = self._infer_image(
+                image[y1:y2, x1:x2],
+                input_size,
+                confidence,
+            )
+            if not len(boxes):
+                continue
+            tile_width = x2 - x1
+            tile_height = y2 - y1
+            complete = np.ones(len(boxes), dtype=bool)
+            if x1 > 0:
+                complete &= boxes[:, 0] > edge_margin
+            if y1 > 0:
+                complete &= boxes[:, 1] > edge_margin
+            if x2 < width:
+                complete &= boxes[:, 2] < tile_width - edge_margin
+            if y2 < height:
+                complete &= boxes[:, 3] < tile_height - edge_margin
+            boxes = boxes[complete]
+            scores = scores[complete]
+            classes = classes[complete]
+            boxes[:, [0, 2]] += x1
+            boxes[:, [1, 3]] += y1
+            all_boxes.append(boxes)
+            all_scores.append(scores)
+            all_classes.append(classes)
+        if not all_boxes:
+            return (
+                np.empty((0, 4), dtype=np.float32),
+                np.empty(0, dtype=np.float32),
+                np.empty(0, dtype=np.int32),
+            )
+        return self._apply_nms(
+            np.concatenate(all_boxes),
+            np.concatenate(all_scores),
+            np.concatenate(all_classes),
+            iou,
+        )
+
+    def predict(
+        self,
+        source,
+        imgsz=1536,
+        conf=0.25,
+        iou=0.4,
+        device="cpu",
+        verbose=False,
+        sliced=False,
+        slice_conf=0.25,
+        tile_fraction=0.58,
+        edge_margin=4.0,
+    ):
+        del device, verbose
+        image = read_image(source)
+        if image is None:
+            raise ValueError(f"圖片讀取失敗：{source}")
+
+        input_size = int(imgsz or 1536)
+        boxes, class_scores, classes = self._infer_image(
+            image,
+            input_size,
+            conf,
+        )
+        boxes, class_scores, classes = self._apply_nms(
+            boxes,
+            class_scores,
+            classes,
+            iou,
+        )
+        if sliced:
+            sliced_rows = self._infer_slices(
+                image,
+                input_size,
+                float(slice_conf),
+                float(iou),
+                float(tile_fraction),
+                float(edge_margin),
+            )
+            boxes = np.concatenate([boxes, sliced_rows[0]])
+            class_scores = np.concatenate([class_scores, sliced_rows[1]])
+            classes = np.concatenate([classes, sliced_rows[2]])
+            boxes, class_scores, classes = self._apply_nms(
+                boxes,
+                class_scores,
+                classes,
+                iou,
+            )
 
         runtime_boxes = [
             DetectionBox(box.tolist(), float(score), int(class_id))

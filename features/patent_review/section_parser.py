@@ -118,13 +118,19 @@ def split_section_heading(text: str) -> Optional[SectionHeadingMatch]:
     heading_text = stripped
     remainder = ""
     bracketed = re.match(
-        r"^[【〖]\s*([^】〗]+?)\s*[】〗]\s*[:：]?\s*(.*)$", stripped
+        r"^[【〖]\s*([^】〗]+?)\s*[】〗]\s*[:：]?\s*(.*)$",
+        stripped,
+        flags=re.DOTALL,
     )
     if bracketed:
         candidate = bracketed.group(1)
         remainder = bracketed.group(2).strip()
     else:
-        colon = re.match(r"^([^:：]+?)\s*[:：]\s*(.*)$", stripped)
+        colon = re.match(
+            r"^([^:：]+?)\s*[:：]\s*(.*)$",
+            stripped,
+            flags=re.DOTALL,
+        )
         if colon:
             candidate = colon.group(1)
             remainder = colon.group(2).strip()

@@ -87,3 +87,33 @@ sample/output/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local verification, deliverables and application state (never publish)
+.qa/
+deliverables/
+research/
+data/
+**/chat_profile.json
+**/chat_profile.json.tmp
+**/chat_avatar_*
+**/snake_scores.json
+**/snake_scores.json.tmp
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Keep training utilities, not collected documents, labels or dataset reports.
+training/gold_validation_v1/
+training/figure_heading/*/
+training/figure_heading/*.json
+training/first_stage/*/
+training/second_stage/*/
+models/gold_*.json
+models/sealed_holdout*.json
+models/patent_label_group_v2_gold_ft_metrics.json
+models/*.experimental.json
+easyocr_models/*_metrics.json
+# Generated converter output; retain only the synthetic input fixture.
+tests/fixtures/*-北京泰吉.docx

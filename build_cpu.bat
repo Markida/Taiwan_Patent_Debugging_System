@@ -16,6 +16,8 @@ python -m nuitka ^
   --include-package=torchvision ^
   --include-package=cv2 ^
   --include-package=pymupdf ^
+  --include-package=features.taiwan_china_spec ^
+  --include-module=ui.taiwan_china_spec_page ^
   --include-package-data=easyocr ^
   --include-package-data=pymupdf ^
   --windows-icon-from-ico=app\resources\app_icon.ico ^

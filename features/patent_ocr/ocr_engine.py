@@ -5,6 +5,12 @@ import cv2
 import torch
 
 from app.config import (
+    GROUP_LOCATOR_CONF,
+    GROUP_LOCATOR_IOU,
+    GROUP_LOCATOR_SLICED_INFERENCE,
+    GROUP_LOCATOR_SLICE_CONF,
+    GROUP_LOCATOR_TILE_EDGE_MARGIN,
+    GROUP_LOCATOR_TILE_FRACTION,
     YOLO_CONF,
     V3_YOLO_CONF,
     YOLO_IOU,
@@ -16,6 +22,7 @@ from app.config import (
     V3_CHARACTER_MIN_CONFIDENCE,
     OCR_LABEL_CHARACTER_MIN_CONFIDENCE,
     J_MIN_DIGIT_HEIGHT_RATIO,
+    ZERO_MIN_NUMERIC_HEIGHT_RATIO,
     Y_TOLERANCE,
     MAX_X_GAP,
     MAX_LABEL_LENGTH,
@@ -533,6 +540,114 @@ def filter_small_j_detections(
     return accepted, rejected
 
 
+def filter_small_zero_detections(
+    detections,
+    min_numeric_height_ratio=ZERO_MIN_NUMERIC_HEIGHT_RATIO,
+):
+    """Reject only undersized standalone zeroes, not labels containing zero."""
+
+    detections = list(detections or [])
+    reference_heights = [
+        max(0.0, float(item.get("y2", 0)) - float(item.get("y1", 0)))
+        for item in detections
+        if normalize_label_text(item.get("label", item.get("number", "")))
+        not in {"", "0", "'"}
+        and any(
+            character.isalnum()
+            for character in normalize_label_text(
+                item.get("label", item.get("number", ""))
+            )
+        )
+    ]
+    reference_heights = [height for height in reference_heights if height > 0]
+    if not reference_heights:
+        return detections, []
+    minimum_height = median(reference_heights) * float(min_numeric_height_ratio)
+    accepted = []
+    rejected = []
+    for item in detections:
+        label = normalize_label_text(item.get("label", item.get("number", "")))
+        height = max(0.0, float(item.get("y2", 0)) - float(item.get("y1", 0)))
+        if label == "0" and height < minimum_height:
+            rejected_item = dict(item)
+            rejected_item.update({
+                "original_label": label,
+                "auto_filtered": True,
+                "rejection_reason": "zero_smaller_than_numeric_labels",
+            })
+            rejected.append(rejected_item)
+        else:
+            accepted.append(item)
+    return accepted, rejected
+
+
+def suppress_nested_label_detections(detections, containment_threshold=0.80):
+    """Keep a complete label and discard redundant contained sub-labels.
+
+    Group detectors can return both ``212`` and a second box around its final
+    ``2``. Spatial containment plus a text-substring check makes this narrow
+    enough to preserve unrelated nearby labels.
+    """
+
+    source = list(detections or [])
+
+    def area(item):
+        return max(0.0, float(item.get("x2", 0)) - float(item.get("x1", 0))) * max(
+            0.0, float(item.get("y2", 0)) - float(item.get("y1", 0))
+        )
+
+    ranked = sorted(
+        enumerate(source),
+        key=lambda pair: (
+            -len(normalize_label_text(pair[1].get("label", ""))),
+            -area(pair[1]),
+            -float(pair[1].get("confidence", 0.0)),
+            pair[0],
+        ),
+    )
+    retained = []
+    rejected = []
+    for original_index, candidate in ranked:
+        candidate_label = normalize_label_text(candidate.get("label", ""))
+        candidate_area = area(candidate)
+        nested_in = None
+        if candidate_label and candidate_area > 0:
+            for _kept_index, kept in retained:
+                kept_label = normalize_label_text(kept.get("label", ""))
+                if candidate_label not in kept_label:
+                    continue
+                overlap_width = max(
+                    0.0,
+                    min(float(candidate.get("x2", 0)), float(kept.get("x2", 0)))
+                    - max(float(candidate.get("x1", 0)), float(kept.get("x1", 0))),
+                )
+                overlap_height = max(
+                    0.0,
+                    min(float(candidate.get("y2", 0)), float(kept.get("y2", 0)))
+                    - max(float(candidate.get("y1", 0)), float(kept.get("y1", 0))),
+                )
+                if overlap_width * overlap_height / candidate_area >= float(
+                    containment_threshold
+                ):
+                    nested_in = kept_label
+                    break
+        if nested_in is None:
+            retained.append((original_index, candidate))
+            continue
+        rejected_item = dict(candidate)
+        rejected_item.update({
+            "original_label": candidate_label,
+            "auto_filtered": True,
+            "rejection_reason": "nested_duplicate_label",
+            "retained_parent_label": nested_in,
+        })
+        rejected.append(rejected_item)
+    return (
+        [item for _index, item in sorted(retained, key=lambda pair: pair[0])],
+        rejected,
+    )
+
+
 def group_chars_to_labels(
     char_items,
     y_tolerance=15,
@@ -715,9 +830,11 @@ def recognize_one_image(
     model_name,
     class_map=None,
     use_yolo_class_as_char=False,
-    yolo_conf=YOLO_CONF,
+    yolo_conf=None,
     ocr_conf=OCR_CONF,
     imgsz=IMG_SIZE,
+    nms_iou=None,
+    sliced_group_inference=None,
     pad=PAD,
     y_tolerance=Y_TOLERANCE,
     max_x_gap=MAX_X_GAP,
@@ -743,10 +860,21 @@ def recognize_one_image(
 
     compute_device = get_compute_device()
 
-    effective_yolo_conf = resolve_yolo_confidence(
-        model,
-        use_yolo_class_as_char,
-        default=yolo_conf,
+    use_yolo_label_groups = is_yolo_label_model(model)
+    requested_yolo_conf = YOLO_CONF if yolo_conf is None else float(yolo_conf)
+    effective_yolo_conf = (
+        GROUP_LOCATOR_CONF
+        if use_yolo_label_groups and yolo_conf is None
+        else resolve_yolo_confidence(
+            model,
+            use_yolo_class_as_char,
+            default=requested_yolo_conf,
+        )
+    )
+    effective_nms_iou = (
+        GROUP_LOCATOR_IOU
+        if use_yolo_label_groups and nms_iou is None
+        else YOLO_IOU if nms_iou is None else float(nms_iou)
     )
     is_v3_case_sensitive_model = is_v3_case_sensitive_char_model(
         model,
@@ -763,13 +891,29 @@ def recognize_one_image(
         else ocr_conf
     )
 
+    predict_kwargs = {
+        "source": str(image_path),
+        "imgsz": imgsz,
+        "conf": effective_yolo_conf,
+        "iou": effective_nms_iou,
+        "device": compute_device,
+        "verbose": False,
+    }
+    if use_yolo_label_groups and getattr(model, "supports_sliced_inference", False):
+        predict_kwargs.update(
+            {
+                "sliced": (
+                    GROUP_LOCATOR_SLICED_INFERENCE
+                    if sliced_group_inference is None
+                    else bool(sliced_group_inference)
+                ),
+                "slice_conf": GROUP_LOCATOR_SLICE_CONF,
+                "tile_fraction": GROUP_LOCATOR_TILE_FRACTION,
+                "edge_margin": GROUP_LOCATOR_TILE_EDGE_MARGIN,
+            }
+        )
     results = model.predict(
-        source=str(image_path),
-        imgsz=imgsz,
-        conf=effective_yolo_conf,
-        iou=YOLO_IOU,
-        device=compute_device,
-        verbose=False
+        **predict_kwargs
     )
 
     boxes = results[0].boxes
@@ -777,7 +921,6 @@ def recognize_one_image(
     char_items = []
     label_items = []
     rejected_items = []
-    use_yolo_label_groups = is_yolo_label_model(model)
 
     if boxes is not None and len(boxes) > 0:
 
@@ -986,6 +1129,14 @@ def recognize_one_image(
 
     grouped_results, small_j_items = filter_small_j_detections(grouped_results)
     rejected_items.extend(small_j_items)
+    grouped_results, small_zero_items = filter_small_zero_detections(
+        grouped_results
+    )
+    rejected_items.extend(small_zero_items)
+    grouped_results, nested_duplicate_items = suppress_nested_label_detections(
+        grouped_results
+    )
+    rejected_items.extend(nested_duplicate_items)
 
     final_labels = [r["label"] for r in grouped_results]
 

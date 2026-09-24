@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -41,6 +42,18 @@ def get_app_install_dir():
         ):
             return parent
     return base_dir
+
+
+def get_user_data_dir():
+    """Return this Windows user's machine-local application data folder."""
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    root = (
+        Path(local_app_data)
+        if local_app_data
+        else Path.home() / "AppData" / "Local"
+    )
+    return root / "Saint-Island_Patent_MDS"
 
 
 def get_output_base_dir():

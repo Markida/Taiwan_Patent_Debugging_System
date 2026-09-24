@@ -1,4 +1,4 @@
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.2.07"
 APP_NAME = f"Saint-Island_Patent_MDS v{APP_VERSION}"
 
 # 公司區域網路錯誤回報資料夾。
@@ -8,10 +8,21 @@ REVIEW_REPORT_NETWORK_DIR = (
 
 # YOLO / OCR 參數
 YOLO_CONF = 0.25
+# The gold-fine-tuned complete-label locator is calibrated on the sealed
+# 34-page holdout. Full-page inference at 0.10/0.30 reached 98.80% localization
+# recall and 92.83% end-to-end OCR recall. 2x2 slicing added only one true box
+# while creating hundreds of false candidates, so production keeps it off.
+GROUP_LOCATOR_CONF = 0.10
+GROUP_LOCATOR_IOU = 0.30
+GROUP_LOCATOR_SLICED_INFERENCE = False
+GROUP_LOCATOR_SLICE_CONF = 0.25
+GROUP_LOCATOR_TILE_FRACTION = 0.58
+GROUP_LOCATOR_TILE_EDGE_MARGIN = 4.0
 # High-recall policy requested for the 63-class v3 character model. On the 18
 # manually-labelled validation pages, 0.05 retained 96.90% recall and 97.23%
 # precision. Low-confidence results remain visible in red for manual review.
-# Group locators and legacy character models continue to use YOLO_CONF.
+# Legacy character models continue to use YOLO_CONF; the complete-label
+# locator uses the independently calibrated GROUP_LOCATOR_* policy above.
 V3_YOLO_CONF = 0.05
 YOLO_IOU = 0.40
 OCR_CONF = 0.20
@@ -35,6 +46,7 @@ LETTER_CHARACTER_MIN_CONFIDENCE = {
 # cropping.  Approved real 6/7 samples are consistently above this threshold.
 OCR_CHARACTER_MIN_CONFIDENCE = {
     **LETTER_CHARACTER_MIN_CONFIDENCE,
+    "0": 0.35,
     "6": 0.80,
     "7": 0.80,
     "J": 0.90,
@@ -45,18 +57,23 @@ OCR_CHARACTER_MIN_CONFIDENCE = {
 # labels use 0.20, Roman I/V/X retain 0.05, and J remains high-risk.
 V3_CHARACTER_MIN_CONFIDENCE = {
     **LETTER_CHARACTER_MIN_CONFIDENCE,
+    "0": 0.15,
     "J": 0.90,
 }
 
 # Group-level EasyOCR can mistake drawing strokes for a standalone J.
 # Real J labels remain available when OCR is confident enough.
 OCR_LABEL_CHARACTER_MIN_CONFIDENCE = {
+    "0": 0.35,
     "J": 0.90,
 }
 
 # A valid J should be approximately as tall as numeric labels on the same page.
 # Keep 10% tolerance for detector-box variation.
 J_MIN_DIGIT_HEIGHT_RATIO = 0.90
+# Small circular drawing marks are a recurring false-positive source for a
+# standalone 0. A real zero normally shares the page's ordinary label height.
+ZERO_MIN_NUMERIC_HEIGHT_RATIO = 0.65
 
 # 標號組合參數
 Y_TOLERANCE = 15

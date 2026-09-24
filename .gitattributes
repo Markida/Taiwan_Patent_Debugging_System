@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+*.bat text eol=crlf
+# An empty TSV replacement column is meaningful (delete the source phrase).
+*.tsv whitespace=-blank-at-eol

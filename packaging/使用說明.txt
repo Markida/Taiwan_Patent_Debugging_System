@@ -23,6 +23,7 @@ Saint-Island Patent OCR v1.06.3 — 公司離線版（CPU）
 - 請勿自行刪除 runtime 內看似無關的 DLL 或套件。
 
 此版本內附
-- 正式 ONNX 標號定位模型：patent_label_group_v1.onnx
+- 正式 ONNX 標號定位模型：patent_label_group_v2_gold_ft.onnx
+- 回退用舊模型：patent_label_group_v1.onnx
 - 英數字與 prime mark OCR 權重：english_g2.pth
 - 完整 CPU Python / PySide6 / Torch / OpenCV 離線執行環境

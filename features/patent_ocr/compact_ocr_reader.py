@@ -195,6 +195,7 @@ class CompactEnglishReader:
         model.load_state_dict(normalized_state)
 
         self.model = model.to(self.device).eval()
+        self._ignored_indexes_by_allowlist = {}
 
     def _predict(self, tensor, allowlist, adjust_contrast=0.0):
         if adjust_contrast:
@@ -203,12 +204,16 @@ class CompactEnglishReader:
             logits = self.model(tensor.to(self.device))
             probabilities = functional.softmax(logits, dim=2).cpu().numpy()[0]
 
-        allowed = set(allowlist or self.character)
-        ignored = [
-            index
-            for index, character in enumerate(self.converter_characters)
-            if index and character not in allowed
-        ]
+        allowlist_key = allowlist or self.character
+        ignored = self._ignored_indexes_by_allowlist.get(allowlist_key)
+        if ignored is None:
+            allowed = set(allowlist_key)
+            ignored = tuple(
+                index
+                for index, character in enumerate(self.converter_characters)
+                if index and character not in allowed
+            )
+            self._ignored_indexes_by_allowlist[allowlist_key] = ignored
         probabilities[:, ignored] = 0.0
         totals = probabilities.sum(axis=1, keepdims=True)
         probabilities = probabilities / np.maximum(totals, 1e-12)

@@ -10,8 +10,9 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("Saint-Island_Patent_MDS")]
 [assembly: AssemblyCompany("Saint-Island")]
 [assembly: AssemblyDescription("Offline CPU launcher for Saint-Island Patent OCR")]
-[assembly: AssemblyVersion("2.0.4.0")]
-[assembly: AssemblyFileVersion("2.0.4.0")]
+[assembly: AssemblyVersion("2.2.7.0")]
+[assembly: AssemblyFileVersion("2.2.7.0")]
+[assembly: AssemblyInformationalVersion("2.2.07")]
 
 internal static class Program
 {
@@ -59,7 +60,9 @@ internal static class Program
                 WorkingDirectory = app,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = automatedTest,
+                RedirectStandardError = automatedTest
             };
 
             // Do not touch ProcessStartInfo.EnvironmentVariables here. Some
@@ -81,14 +84,39 @@ internal static class Program
             Environment.SetEnvironmentVariable("KMP_DUPLICATE_LIB_OK", "TRUE");
             Environment.SetEnvironmentVariable("OMP_NUM_THREADS", "1");
             Environment.SetEnvironmentVariable("MKL_NUM_THREADS", "1");
+            // Some managed company profiles deny writes to AppData and the
+            // system temp directory. The application root is already writable
+            // during updates, so keep Ultralytics settings in its data folder.
             Environment.SetEnvironmentVariable("YOLO_CONFIG_DIR", Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Saint-IslandPatentOCR"));
+                root, "data", "ultralytics"));
 
             using (Process child = Process.Start(startInfo))
             {
                 WriteDiagnostic(diagnosticLog, "Child started. PID=" + child.Id);
+                // Drain both pipes concurrently. A full stderr pipe must not
+                // deadlock the updater while it is waiting for stdout EOF.
+                var outputBuffer = new StringBuilder();
+                var errorBuffer = new StringBuilder();
+                if (automatedTest)
+                {
+                    child.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
+                    {
+                        if (e.Data != null) outputBuffer.AppendLine(e.Data);
+                    };
+                    child.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+                    {
+                        if (e.Data != null) errorBuffer.AppendLine(e.Data);
+                    };
+                    child.BeginOutputReadLine();
+                    child.BeginErrorReadLine();
+                }
                 child.WaitForExit();
+                string standardOutput = outputBuffer.ToString();
+                string standardError = errorBuffer.ToString();
+                if (!String.IsNullOrWhiteSpace(standardOutput))
+                    WriteDiagnostic(diagnosticLog, "Child stdout=" + standardOutput.Trim());
+                if (!String.IsNullOrWhiteSpace(standardError))
+                    WriteDiagnostic(diagnosticLog, "Child stderr=" + standardError.Trim());
                 WriteDiagnostic(diagnosticLog, "Child exit=" + child.ExitCode);
                 return child.ExitCode;
             }
